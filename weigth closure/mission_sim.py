@@ -88,7 +88,7 @@ C_Lmax    = f.Constant(name="C_Lmax"   , value=1.0       , units="-"        , de
 TW_TO     = f.Constant(name="TW_TO"    , value=0.5       , units="-"        , description="Required takeoff thrust/weight")
 
 # Propulsion (model-scale turbojet, e.g. JetCat / KingTech class)
-c_T       = f.Constant(name="c_T"      , value=1.5       , units="1/hr"     , description="Cruise TSFC")
+c_T       = f.Constant(name="c_T"      , value=1.25       , units="1/hr"     , description="Cruise TSFC")
 K_ram     = f.Constant(name="K_ram"    , value=0.5       , units="-"        , description="Ram recovery factor on thrust lapse (~1 near M 1)")
 #research if what this factor is close to
 TW_eng    = f.Constant(name="TW_eng"   , value=9.0       , units="-"        , description="Installed engine thrust-to-weight")
@@ -118,6 +118,7 @@ a_SL      = f.Constant(name="a_SL"     , value=1116.4    , units="ft/s"     , de
 a_strat   = f.Constant(name="a_strat"  , value=968.1     , units="ft/s"     , description="Speed of sound above 36,089 ft")
 sig_max   = f.Constant(name="sig_max"  , value=0.4481    , units="-"        , description="Density ratio at 25,000 ft (lowest cruise)")
 sig_min   = f.Constant(name="sig_min"  , value=0.1197    , units="-"        , description="Density ratio at 55,000 ft (ceiling)")
+h_max     = f.Constant(name="h_max"    , value=40000.0   , units="ft"       , description="Max cruise altitude")
 f_res     = f.Constant(name="f_res"    , value=0.06      , units="-"        , description="Reserve fuel as fraction of W_ZF")
 
 # Reference quantities so the imperial Raymer fit is dimensionally clean
@@ -190,6 +191,7 @@ f.ConstraintList([
         # --- Altitude / atmosphere ------------------------------------------
         lapse == K_ram * sigma**0.7,                       # turbojet thrust lapse #verify formula this is available thrust at cruise
         h     >= h_fit * sigma**-0.5701,                   # altitude from density
+        h     <= h_max,                                    # cruise altitude ceiling
         sigma <= sig_max,
         sigma >= sig_min,
         a     >= a_SL * sigma**0.1175,                     # troposphere: a ~ T^0.5
