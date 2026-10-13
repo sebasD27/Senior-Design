@@ -1,0 +1,611 @@
+# superDrone (based on flend_udf_3 by John Dannenhoffer)
+# - delta wing (NACA sections) with a flend on each side
+# - elevons on the delta wing and a rudder on the fin (flapz UDC)
+# - single vertical fin (NACA sections) with its own flend
+# - tangent-ogive nose and boattail
+# - optional AFLR-ready C-style half-model CFD domain (cfd:mesh) with Farfield / Symmetry / Aircraft groups
+#
+# Construction notes
+#  * every flend is built on a plain cylinder exactly like the stock example
+#    (the fin is built like a wing on the +z side, then rotated up to +y)
+#  * three modules (right wing, mirrored left wing, fin) are cut on planes just
+#    inside the fuselage skin and joined there, so no curved surfaces coincide
+
+DESPMTR   flendSize  0.10       # size of the fillet regions
+
+# ---------------- delta wing parameters (each semi-span) ----------------
+DESPMTR   wing:span     2.0     # semi-span, measured from the fuselage centerline
+DESPMTR   wing:croot    3.0     # root chord
+DESPMTR   wing:taper    0.1     # tip chord / root chord (0 would be a pure delta)
+DESPMTR   wing:tesweep  0.0     # trailing-edge sweep (deg): 0 = straight TE = delta
+DESPMTR   wing:dihed    0.0     # dihedral (deg)
+DESPMTR   wing:xroot    0.0     # x of the root leading edge
+DESPMTR   wing:yloc     0.1     # y of the wing reference line at the root
+
+# NACA 4-digit airfoil (root and tip can differ)
+DESPMTR   wing:thickr   0.05    # root thickness / chord
+DESPMTR   wing:thickt   0.05    # tip  thickness / chord
+DESPMTR   wing:camberr  0.0     # root max camber / chord  (0 = symmetric)
+DESPMTR   wing:cambert  0.0     # tip  max camber / chord
+DESPMTR   wing:maxloc   0.4     # chordwise location of max camber
+DESPMTR   wing:sharpte  0       # 0 = blunt (tiny) trailing edge, 1 = sharp
+
+SET       wing:ctip    wing:croot*wing:taper
+SET       wing:xtip    wing:xroot+wing:croot+wing:span*tand(wing:tesweep)-wing:ctip
+SET       wing:ytip    wing:yloc+wing:span*tand(wing:dihed)
+SET       wing:sweep   atand((wing:xtip-wing:xroot)/wing:span)   # resulting LE sweep
+
+# ---------------- reference quantities (OUTPMTRs, for REF_LENGTH / REF_AREA in SU2) ----------------
+# trapezoidal planform of each wing panel, measured from the fuselage centerline
+# (root chord wing:croot at the centerline, tip chord wing:ctip at wing:span)
+OUTPMTR   wing:taperRatio
+OUTPMTR   wing:refArea          # full planform area, both wings
+OUTPMTR   wing:refAreaHalf      # one wing panel: use this as REF_AREA for the half-model mesh
+OUTPMTR   wing:refSpan          # full span, tip to tip
+OUTPMTR   wing:AR
+OUTPMTR   wing:MAC              # mean aerodynamic chord: use as REF_LENGTH
+OUTPMTR   wing:yMAC             # spanwise station of the MAC, from the centerline
+OUTPMTR   wing:xMAC             # x of the MAC leading edge
+OUTPMTR   wing:xRef             # x of the MAC quarter chord (moment reference, build frame)
+
+SET       wing:taperRatio   wing:ctip/wing:croot
+SET       wing:refAreaHalf  wing:span*(wing:croot+wing:ctip)/2
+SET       wing:refArea      2*wing:refAreaHalf
+SET       wing:refSpan      2*wing:span
+SET       wing:AR           wing:refSpan^2/wing:refArea
+SET       wing:MAC          (2/3)*wing:croot*(1+wing:taperRatio+wing:taperRatio^2)/(1+wing:taperRatio)
+SET       wing:yMAC         (wing:span/3)*(1+2*wing:taperRatio)/(1+wing:taperRatio)
+SET       wing:xMAC         wing:xroot+(wing:xtip-wing:xroot)*wing:yMAC/wing:span
+SET       wing:xRef         wing:xMAC+0.25*wing:MAC
+
+# ---------------- fuselage parameters ----------------
+DESPMTR   fus:radius    0.42    # radius of the mid-section (wing and fin sit on it)
+DESPMTR   fus:lnose     3.0     # nose length
+DESPMTR   fus:rnose     0.10    # nose tip radius (spherical cap): 0.01 = nearly sharp, must be < fus:radius
+DESPMTR   fus:ltail     2.0     # boattail length
+DESPMTR   fus:rtail     0.24    # base (exhaust) radius
+DESPMTR   fus:mfwd      1.0     # mid-section extends this far ahead of the wing root LE
+DESPMTR   fus:maft      0.8     # ... and this far behind the wing root TE
+
+SET       fus:xcyl1    wing:xroot-fus:mfwd
+SET       fus:xcyl2    wing:xroot+wing:croot+fus:maft
+SET       fus:xnose    fus:xcyl1-fus:lnose
+SET       fus:xtail    fus:xcyl2+fus:ltail
+
+# ---------------- vertical fin parameters ----------------
+DESPMTR   vtail:height  1.1     # height above the fuselage centerline
+DESPMTR   vtail:croot   1.0     # root chord
+DESPMTR   vtail:taper   0.4     # tip chord / root chord
+DESPMTR   vtail:sweep   45      # leading-edge sweep (deg)
+DESPMTR   vtail:thick   0.08    # NACA thickness / chord (symmetric)
+DESPMTR   vtail:xinset  0.4     # root TE sits this far ahead of the end of the mid-section
+DESPMTR   vtail:sharpte 0       # 0 = blunt (tiny) trailing edge, 1 = sharp
+DESPMTR   vtail:tekeep  0.92    # fraction of the NACA section kept (1 = full section).
+                                # < 1 cuts the section off ahead of its trailing edge, leaving a
+                                # finite-thickness base. The half-model symmetry plane cuts the fin
+                                # along its midplane, and the stock NACA TE (~3e-4 there) is thinner
+                                # than the first boundary-layer cell, which folds the BL mesh.
+                                # The actual root/tip chords stay vtail:croot and vtail:ctip.
+
+SET       vtail:ctip   vtail:croot*vtail:taper
+SET       vtail:xroot  fus:xcyl2-vtail:xinset-vtail:croot
+SET       vtail:xtip   vtail:xroot+vtail:height*tand(vtail:sweep)
+
+# ---------------- CFD domain (AFLR4/AFLR3 through CAPS) ----------------
+# C-style half domain: a hemisphere ahead of the aircraft that continues as a cylinder
+# behind it (both have the same radius, so the join is smooth). The domain is
+# axisymmetric about the x-axis; only the z >= 0 half is built, and the z = 0 plane
+# is the symmetry plane.
+# ---------------- orientation ----------------
+CFGPMTR   flip:x              0     # 1 = mirror the final result fore/aft about x = 0 (nose points to +x)
+                                    # keep 0 for SU2: its freestream moves toward +x, so the nose must point to -x
+CFGPMTR   su2:axes            1     # 1 = rotate the final result to SU2 axes: x downstream, y spanwise, z up
+                                    #     (symmetry plane becomes y = 0, half model on the -y side)
+                                    # 0 = build frame: y up, wings along z, symmetry plane z = 0
+                                    # (both are applied last, so a CFD domain moves with the aircraft)
+
+CFGPMTR   cfd:mesh            1     # 1 = wrap the aircraft in the tagged C-style domain
+CFGPMTR   cfd:viscous         1     # 1 = aircraft faces generate boundary layers (AFLR_GBC -STD_UG3_GBC), 0 = inviscid/no BL
+DESPMTR   cfd:lateralMult     5.0   # radius of the hemisphere and the cylinder, in aircraft lengths
+DESPMTR   cfd:upstreamMult    5.0   # standoff from the nose to the front of the hemisphere, in aircraft lengths
+DESPMTR   cfd:downstreamMult  10.0   # standoff from the tail to the outflow plane (wake room), in aircraft lengths
+
+# ---------------- control surfaces (flapz UDC) ----------------
+# master switch: 1 = cut the elevons and the rudder, 0 = plain wing and fin
+# (a CFGPMTR is a configuration parameter: changing it rebuilds the whole model)
+CFGPMTR   controls   0
+
+# Each surface is a hinge line plus a gap; the outline polygon is built below.
+# flapz projects both hinge end points onto the wing/fin to measure its thickness,
+# so both end points must lie ON the body: keep etain > 0 and etaout < 1 (about 0.98 max).
+# theta: positive = trailing edge down (if it goes the wrong way, flip the sign)
+DESPMTR   elevon:etain   0.40   # inboard end, as a fraction of the wing semi-span
+DESPMTR   elevon:etaout  0.95   # outboard end, as a fraction of the wing semi-span (< 1)
+DESPMTR   elevon:cf      0.25   # chord fraction: hinge sits at TE - cf*local chord
+DESPMTR   elevon:theta   5.0    # deflection (deg); both elevons move together
+DESPMTR   elevon:gap     0.03   # gap around the elevon
+DESPMTR   elevon:openEnd 1      # 1 = elevon is free at its ends (only hinged)
+
+DESPMTR   rudder:etain   0.60   # lower end, as a fraction of the fin height
+DESPMTR   rudder:etaout  0.95   # upper end; must be < 1 (see note above)
+DESPMTR   rudder:cf      0.30   # chord fraction
+DESPMTR   rudder:theta   5.0    # deflection (deg)
+DESPMTR   rudder:gap     0.02   # gap around the rudder
+DESPMTR   rudder:openEnd 1
+
+# elevon outline in the flapz frame (planform in x-y, thickness in z):
+# the wing is rotated by ROTATEX 90 there, so span z becomes y = -z.
+# points: aft/inboard, hinge/inboard, hinge/outboard, aft/outboard
+DIMENSION elevon:xflap  4 1
+DIMENSION elevon:yflap  4 1
+SET       elevon:zin    elevon:etain*wing:span
+SET       elevon:zout   elevon:etaout*wing:span
+SET       elevon:xtein  wing:xroot+wing:croot+elevon:etain*(wing:xtip+wing:ctip-wing:xroot-wing:croot)
+SET       elevon:xteout wing:xroot+wing:croot+elevon:etaout*(wing:xtip+wing:ctip-wing:xroot-wing:croot)
+SET       elevon:xhin   elevon:xtein-elevon:cf*wing:croot*(1-(1-wing:taper)*elevon:etain)
+SET       elevon:xhout  elevon:xteout-elevon:cf*wing:croot*(1-(1-wing:taper)*elevon:etaout)
+SET       elevon:xaft   max(elevon:xtein,elevon:xteout)+0.25
+SET       elevon:xflap[1]  elevon:xaft
+SET       elevon:xflap[2]  elevon:xhin
+SET       elevon:xflap[3]  elevon:xhout
+SET       elevon:xflap[4]  elevon:xaft
+SET       elevon:yflap[1]  -elevon:zin
+SET       elevon:yflap[2]  -elevon:zin
+SET       elevon:yflap[3]  -elevon:zout
+SET       elevon:yflap[4]  -elevon:zout
+
+# rudder outline (the fin is built like a wing on +z, so the same mapping applies)
+DIMENSION rudder:xflap  4 1
+DIMENSION rudder:yflap  4 1
+SET       rudder:zin    rudder:etain*vtail:height
+SET       rudder:zout   rudder:etaout*vtail:height
+SET       rudder:xtein  vtail:xroot+vtail:croot+rudder:etain*(vtail:xtip+vtail:ctip-vtail:xroot-vtail:croot)
+SET       rudder:xteout vtail:xroot+vtail:croot+rudder:etaout*(vtail:xtip+vtail:ctip-vtail:xroot-vtail:croot)
+SET       rudder:xhin   rudder:xtein-rudder:cf*vtail:croot*(1-(1-vtail:taper)*rudder:etain)
+SET       rudder:xhout  rudder:xteout-rudder:cf*vtail:croot*(1-(1-vtail:taper)*rudder:etaout)
+SET       rudder:xaft   max(rudder:xtein,rudder:xteout)+0.25
+SET       rudder:xflap[1]  rudder:xaft
+SET       rudder:xflap[2]  rudder:xhin
+SET       rudder:xflap[3]  rudder:xhout
+SET       rudder:xflap[4]  rudder:xaft
+SET       rudder:yflap[1]  -rudder:zin
+SET       rudder:yflap[2]  -rudder:zin
+SET       rudder:yflap[3]  -rudder:zout
+SET       rudder:yflap[4]  -rudder:zout
+
+# ---------------- nose and boattail (stored for later) ----------------
+# blunt nose = tangent ogive with a spherical cap on the tip.
+#  - the ogive is the circle (radius rho) that would reach a sharp point at fus:xnose
+#    and is tangent to the mid-section at xcyl1
+#  - the cap is a circle of radius rnose centered on the axis at xs, tangent to the ogive
+#    at point T (internal tangency: |center distance| = rho - rnose)
+SET       ogive:len   fus:xcyl1-fus:xnose
+SET       ogive:rho   (fus:radius^2+ogive:len^2)/(2*fus:radius)
+SET       ogive:cy    fus:radius-ogive:rho                 # ogive circle center is (xcyl1, cy)
+SET       ogive:xs    fus:xcyl1-sqrt((ogive:rho-fus:rnose)^2-ogive:cy^2)   # cap center is (xs, 0)
+SET       ogive:thT   atan2d(-ogive:cy,ogive:xs-fus:xcyl1) # direction of the tangent point
+SET       ogive:xT    fus:xcyl1+ogive:rho*cosd(ogive:thT)
+SET       ogive:yT    ogive:cy+ogive:rho*sind(ogive:thT)
+SET       ogive:thm1  (180+ogive:thT)/2                    # mid-angle on the cap arc
+SET       ogive:xm1   ogive:xs+fus:rnose*cosd(ogive:thm1)
+SET       ogive:ym1   fus:rnose*sind(ogive:thm1)
+SET       ogive:thm2  (ogive:thT+90)/2                     # mid-angle on the ogive arc
+SET       ogive:xm2   fus:xcyl1+ogive:rho*cosd(ogive:thm2)
+SET       ogive:ym2   ogive:cy+ogive:rho*sind(ogive:thm2)
+SET       ogive:xtip  ogive:xs-fus:rnose                   # actual nose tip (a bit aft of xnose)
+
+SKBEG     ogive:xtip  0           0
+   CIRARC ogive:xm1   ogive:ym1   0    ogive:xT    ogive:yT   0
+   CIRARC ogive:xm2   ogive:ym2   0    fus:xcyl1   fus:radius 0
+   LINSEG fus:xcyl1   0           0
+   LINSEG ogive:xtip  0           0
+SKEND
+REVOLVE   0  0  0  1  0  0  360
+ASSERT    @itype  3
+STORE     nose
+
+SKBEG     fus:xcyl2   0            0
+   LINSEG fus:xcyl2   fus:radius   0
+   LINSEG fus:xtail   fus:rtail    0
+   LINSEG fus:xtail   0            0
+   LINSEG fus:xcyl2   0            0
+SKEND
+REVOLVE   0  0  0  1  0  0  360
+ASSERT    @itype  3
+STORE     tail
+
+# ---------------- wing (right side, +z) ----------------
+MARK
+   UDPARG    naca      thickness  wing:thickr
+   UDPARG    naca      camber     wing:camberr
+   UDPARG    naca      maxloc     wing:maxloc
+   UDPRIM    naca      sharpte    wing:sharpte
+   SELECT    EDGE
+   SET       wing:nedge  @sellist.size     # number of Faces the RULE will make
+   SCALE     wing:croot
+   TRANSLATE wing:xroot  wing:yloc  0.0
+
+   UDPARG    naca      thickness  wing:thickt
+   UDPARG    naca      camber     wing:cambert
+   UDPARG    naca      maxloc     wing:maxloc
+   UDPRIM    naca      sharpte    wing:sharpte
+   SCALE     wing:ctip
+   TRANSLATE wing:xtip   wing:ytip  wing:span
+RULE
+
+# cut the elevon: flapz wants the planform in the x-y plane, so rotate the wing by
+# ROTATEX 90 (span z -> -y, thickness y -> z, upper surface stays +z), then rotate back.
+IFTHEN    controls  eq  1
+   ROTATEX   90  0  0
+   UDPARG    $$/flapz   xflap     elevon:xflap
+   UDPARG    $$/flapz   yflap     elevon:yflap
+   UDPARG    $$/flapz   theta     elevon:theta
+   UDPARG    $$/flapz   gap       elevon:gap
+   UDPARG    $$/flapz   openEnd   elevon:openEnd
+   UDPRIM    $$/flapz
+   ROTATEX   -90  0  0
+ENDIF
+STORE     wing
+
+# offset wing
+MARK
+   UDPARG    naca      thickness  wing:thickr
+   UDPARG    naca      camber     wing:camberr
+   UDPARG    naca      maxloc     wing:maxloc
+   UDPRIM    naca      sharpte    wing:sharpte
+   SCALE     wing:croot
+   UDPRIM    offset    dist       flendSize
+   TRANSLATE wing:xroot  wing:yloc  0.0
+
+   UDPARG    naca      thickness  wing:thickt
+   UDPARG    naca      camber     wing:cambert
+   UDPARG    naca      maxloc     wing:maxloc
+   UDPRIM    naca      sharpte    wing:sharpte
+   SCALE     wing:ctip
+   UDPRIM    offset    dist       flendSize
+   TRANSLATE wing:xtip   wing:ytip  wing:span
+RULE
+STORE     offset_wing
+
+# ---------------- fin, built like a wing on the +z side ----------------
+# each section: NACA section on the unit chord, optionally cut off at x = tekeep
+# (solid BOX first, then the section SheetBody, as in intersect_2), then scaled so
+# that the cut section has the requested chord
+MARK
+   IFTHEN    vtail:tekeep  lt  1
+      BOX       -0.5  -0.5  -0.5   0.5+vtail:tekeep  1  1
+   ENDIF
+   UDPARG    naca      thickness  vtail:thick
+   UDPRIM    naca      sharpte    vtail:sharpte
+   IFTHEN    vtail:tekeep  lt  1
+      INTERSECT
+      ASSERT    @itype  2
+   ENDIF
+   SELECT    EDGE
+   SET       vtail:nedge  @sellist.size
+   SCALE     vtail:croot/vtail:tekeep
+   TRANSLATE vtail:xroot  0.0  0.0
+
+   IFTHEN    vtail:tekeep  lt  1
+      BOX       -0.5  -0.5  -0.5   0.5+vtail:tekeep  1  1
+   ENDIF
+   UDPARG    naca      thickness  vtail:thick
+   UDPRIM    naca      sharpte    vtail:sharpte
+   IFTHEN    vtail:tekeep  lt  1
+      INTERSECT
+      ASSERT    @itype  2
+   ENDIF
+   SCALE     vtail:ctip/vtail:tekeep
+   TRANSLATE vtail:xtip   0.0  vtail:height
+RULE
+
+# cut the rudder (same frame change as for the elevon)
+IFTHEN    controls  eq  1
+   ROTATEX   90  0  0
+   UDPARG    $$/flapz   xflap     rudder:xflap
+   UDPARG    $$/flapz   yflap     rudder:yflap
+   UDPARG    $$/flapz   theta     rudder:theta
+   UDPARG    $$/flapz   gap       rudder:gap
+   UDPARG    $$/flapz   openEnd   rudder:openEnd
+   UDPRIM    $$/flapz
+   ROTATEX   -90  0  0
+ENDIF
+STORE     fin
+
+MARK
+   IFTHEN    vtail:tekeep  lt  1
+      BOX       -0.5  -0.5  -0.5   0.5+vtail:tekeep  1  1
+   ENDIF
+   UDPARG    naca      thickness  vtail:thick
+   UDPRIM    naca      sharpte    vtail:sharpte
+   IFTHEN    vtail:tekeep  lt  1
+      INTERSECT
+      ASSERT    @itype  2
+   ENDIF
+   SCALE     vtail:croot/vtail:tekeep
+   UDPRIM    offset    dist       flendSize
+   TRANSLATE vtail:xroot  0.0  0.0
+
+   IFTHEN    vtail:tekeep  lt  1
+      BOX       -0.5  -0.5  -0.5   0.5+vtail:tekeep  1  1
+   ENDIF
+   UDPARG    naca      thickness  vtail:thick
+   UDPRIM    naca      sharpte    vtail:sharpte
+   IFTHEN    vtail:tekeep  lt  1
+      INTERSECT
+      ASSERT    @itype  2
+   ENDIF
+   SCALE     vtail:ctip/vtail:tekeep
+   UDPRIM    offset    dist       flendSize
+   TRANSLATE vtail:xtip   0.0  vtail:height
+RULE
+STORE     offset_fin
+
+# ---------------- fuselage mid-section (same construction as the stock example) ----------------
+CYLINDER     fus:xcyl1  0.0  0.0  fus:xcyl2  0.0  0.0  fus:radius
+# remember which Body created the cylinder: its Faces keep this Body index
+# (the stock file hard-codes 26, which changes whenever branches are added above)
+SET       cylBody  @nbody
+ROTATEX      90    0.0  0.0
+STORE     fuse
+
+# =========================== WING MODULE ===========================
+# scribe fuselage with slightly-larger wing
+RESTORE   fuse
+RESTORE   offset_wing
+EXTRACT   0
+SUBTRACT
+STORE     newFuse
+
+# scribe wing with slightly-translated fuselage
+RESTORE   wing
+RESTORE   fuse
+TRANSLATE 0  0  flendSize
+EXTRACT   0
+SUBTRACT
+STORE     newWing
+
+# wing Faces inside the scribe: root cap plus one inner piece per airfoil edge
+RESTORE   newWing
+SELECT    FACE
+SELECT    SORT   $zmin
+SET       wing:nrem  wing:nedge+1
+DIMENSION foo    wing:nrem 1
+SET       foo    @sellist
+PATBEG    irem   wing:nrem
+   SELECT FACE   foo[irem]
+      ATTRIBUTE _flend $remove
+PATEND
+STORE     newWing
+
+# fuselage patch under the wing (smallest piece of cylinder Face 4)
+RESTORE   newFuse
+SELECT    FACE   cylBody 4 0
+SELECT    SORT   $area
+SELECT    face   @sellist[1]
+   ATTRIBUTE _flend $remove
+STORE     newFuse
+
+# generate the wing flend
+MARK
+   RESTORE   newWing
+   ROTATEY   90  0  0
+   SELECT    face $_flend $*
+      ATTRIBUTE _color $magenta
+
+   RESTORE   newFuse
+   ROTATEY   90  0  0
+   SELECT    face $_flend $*
+      ATTRIBUTE _color $magenta
+UDPRIM    flend   toler  0.001 plot 1  equis 1
+
+# the stock example rotates both bodies by ROTATEY 90, so rotate back
+ROTATEY   -90  0  0
+
+RESTORE   nose
+UNION
+RESTORE   tail
+UNION
+STORE     rightSide
+
+# =========================== FIN MODULE ===========================
+RESTORE   fuse
+RESTORE   offset_fin
+EXTRACT   0
+SUBTRACT
+STORE     newFuseF
+
+RESTORE   fin
+RESTORE   fuse
+TRANSLATE 0  0  flendSize
+EXTRACT   0
+SUBTRACT
+STORE     newFin
+
+RESTORE   newFin
+SELECT    FACE
+SELECT    SORT   $zmin
+SET       vtail:nrem  vtail:nedge+1
+DIMENSION goo    vtail:nrem 1
+SET       goo    @sellist
+PATBEG    ifin   vtail:nrem
+   SELECT FACE   goo[ifin]
+      ATTRIBUTE _flend $remove
+PATEND
+STORE     newFin
+
+RESTORE   newFuseF
+SELECT    FACE   cylBody 4 0
+SELECT    SORT   $area
+SELECT    face   @sellist[1]
+   ATTRIBUTE _flend $remove
+STORE     newFuseF
+
+MARK
+   RESTORE   newFin
+   ROTATEY   90  0  0
+   SELECT    face $_flend $*
+      ATTRIBUTE _color $magenta
+
+   RESTORE   newFuseF
+   ROTATEY   90  0  0
+   SELECT    face $_flend $*
+      ATTRIBUTE _color $magenta
+UDPRIM    flend   toler  0.001 plot 1  equis 1
+
+ROTATEY   -90  0  0
+# stand the fin up: +z (where it was built) becomes +y
+ROTATEX   -90  0  0
+
+RESTORE   nose
+UNION
+RESTORE   tail
+UNION
+STORE     finSide
+
+# =========================== ASSEMBLY ===========================
+# left wing module is the mirror image of the right one
+RESTORE   rightSide
+MIRROR    0  0  1  0
+STORE     leftSide
+
+# cut planes, both just inside the fuselage skin:
+#   z = zcut separates the wings (must be closer to the centerline than the wing-root footprint)
+#   y = ycut separates the fin from the wings (above the wing footprint, below the fin footprint)
+SET       zcut   -0.25*fus:radius
+SET       ycut   0.8*fus:radius
+
+# fin: keep everything above y = ycut
+RESTORE   finSide
+BOX       -100  ycut  -100  200  100  200
+INTERSECT
+STORE     finPart
+
+# right wing: +z side of the plane, below y = ycut
+RESTORE   rightSide
+BOX       -100  -100  zcut  200  100+ycut  100
+INTERSECT
+STORE     rightPart
+
+# left wing: -z side of the plane, below y = ycut
+RESTORE   leftSide
+BOX       -100  -100  zcut-100  200  100+ycut  100
+INTERSECT
+
+RESTORE   rightPart
+UNION
+RESTORE   finPart
+UNION
+ASSERT    @itype  3
+
+SELECT    FACE
+   ATTRIBUTE _color $cyan
+
+# =========================== CFD DOMAIN ===========================
+# C-style half domain (hemisphere + cylinder) with the aircraft subtracted (the cavity), tagged for aflr4AIM/aflr3AIM:
+#   capsGroup / capsMesh   on every Face (Farfield, Symmetry, Aircraft)
+#   AFLR_GBC               FARFIELD_UG3_GBC on the farfield, -STD_UG3_GBC (BL) or STD_UG3_GBC on the aircraft
+#   capsAIM, capsMeshLength on the Body
+# Tagging never depends on Face counts or numbering: the domain is tagged before the
+# subtract, and whatever is left untagged afterwards is the aircraft.
+IFTHEN    cfd:mesh  eq  1
+   STORE     aircraft
+
+   # size of the finished aircraft
+   RESTORE   aircraft
+   SET       cfd:xmin   @xmin
+   SET       cfd:xmax   @xmax
+   SET       cfd:len    @xmax-@xmin
+   STORE     aircraft
+
+   # C-domain extents: hemisphere of radius R centered at xc, then a cylinder of radius R
+   SET       cfd:R      cfd:lateralMult*cfd:len
+   SET       cfd:xleft  cfd:xmin-cfd:upstreamMult*cfd:len
+   SET       cfd:xc     cfd:xleft+cfd:R
+   SET       cfd:xb     cfd:xmax+cfd:downstreamMult*cfd:len
+   SET       cfd:xm     cfd:xc-cfd:R*cosd(45)
+   SET       cfd:ym     cfd:R*sind(45)
+
+   # half-profile in the x-y plane (y >= 0): quarter circle from the front pole up to the
+   # top of the cylinder, straight cylinder wall, flat outflow plane, back along the axis
+   SKBEG     cfd:xleft  0        0
+      CIRARC cfd:xm     cfd:ym    0    cfd:xc     cfd:R   0
+      LINSEG cfd:xb     cfd:R     0
+      LINSEG cfd:xb     0         0
+      LINSEG cfd:xleft  0         0
+   SKEND
+
+   # spin it into a bullet shape, and put the seam on the -z side so the cut below
+   # (which keeps z >= 0) does not run along it
+   REVOLVE   0  0  0  1  0  0  360
+   ASSERT    @itype  3
+   ROTATEX   -90  0  0
+
+   # keep the z >= 0 half
+   BOX       cfd:xleft-1  -cfd:R-1  0    cfd:xb-cfd:xleft+2  2*cfd:R+2  cfd:R+1
+   INTERSECT
+   ASSERT    @itype  3
+
+   # every Face starts out as Farfield ...
+   SELECT    FACE
+      ATTRIBUTE capsGroup  $Farfield
+      ATTRIBUTE capsMesh   $Farfield
+      ATTRIBUTE AFLR_GBC   $FARFIELD_UG3_GBC
+      ATTRIBUTE _color     $red
+
+   # ... except the Face in the z = 0 plane (the one with the smallest zmax): symmetry
+   SELECT    FACE
+   SELECT    SORT   $zmax
+   SELECT    FACE   @sellist[1]
+      ATTRIBUTE capsGroup  $symmetry
+      ATTRIBUTE capsMesh   $symmetry
+      ATTRIBUTE AFLR_GBC   $STD_UG3_GBC
+      ATTRIBUTE _color     $green
+   STORE     cfdDomain0
+
+   # domain = half domain minus the whole aircraft: the part of the aircraft at z < 0 lies
+   # outside the domain, so only the z >= 0 half is removed, and the aircraft crosses the
+   # symmetry plane transversally (no coplanar Faces)
+   RESTORE   cfdDomain0
+   RESTORE   aircraft
+   SUBTRACT
+   ASSERT    @itype  3
+
+   # every Face that did not come from the domain is the aircraft
+   SELECT    FACE  $capsGroup  $*
+   SELECT    NOT
+      ATTRIBUTE capsGroup  $Aircraft
+      ATTRIBUTE capsMesh   $Aircraft
+
+   # grid BC for the aircraft: a NEGATIVE standard BC (-STD_UG3_GBC) marks a surface that
+   # AFLR3 grows boundary layers from; without it, aflr3 with -blc stops with
+   # "ERROR 712: no boundary faces were found with a grid BC set for BL generation"
+   IFTHEN    cfd:viscous  eq  1
+      SELECT    FACE  $capsGroup  $Aircraft
+         ATTRIBUTE AFLR_GBC   $-STD_UG3_GBC
+   ELSE
+      SELECT    FACE  $capsGroup  $Aircraft
+         ATTRIBUTE AFLR_GBC   $STD_UG3_GBC
+   ENDIF
+
+   # Body-level tags
+   SELECT    BODY
+      ATTRIBUTE capsAIM         $aflr4AIM;aflr3AIM
+      ATTRIBUTE capsMeshLength  cfd:len
+ENDIF
+
+# ---------------- orientation ----------------
+# mirror the final Body (aircraft, or CFD domain with the aircraft cavity) about the
+# x = 0 plane; attributes (capsGroup, AFLR_GBC, ...) carry over unchanged
+IFTHEN    flip:x  eq  1
+   MIRROR    1  0  0  0
+ENDIF
+
+# the model is built with y up and the wings along z; SU2 (3D) takes z as up, pitches the
+# freestream with AOA in the x-z plane and reports lift along z. ROTATEX 90 maps
+# (x, y, z) -> (x, -z, y): up (y) becomes +z, the span (z) becomes -y
+IFTHEN    su2:axes  eq  1
+   ROTATEX   90  0  0
+ENDIF
+
+END
