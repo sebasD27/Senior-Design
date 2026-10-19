@@ -32,8 +32,8 @@ def hand_calc(m: MissionCase, d: Design, W_TO: float):
     step("1. Atmosphere at cruise")
     rho = m.rho_SL * sig
     line("rho", "rho_SL * sigma", f"{m.rho_SL} * {sig:.6g}", rho, "slug/ft^3")
-    h = m.h_fit * sig ** -0.5701
-    line("h", "h_fit * sigma^-0.5701", f"{m.h_fit} * {sig:.6g}^-0.5701", h, "ft")
+    h = m.h_fit * sig ** -m.h_exp
+    line("h", "h_fit * sigma^-h_exp", f"{m.h_fit} * {sig:.6g}^-{m.h_exp}", h, "ft")
     a_trop = m.a_SL * sig ** 0.1175
     a = max(m.a_strat, a_trop)
     line("a", "max(a_strat, a_SL * sigma^0.1175)",

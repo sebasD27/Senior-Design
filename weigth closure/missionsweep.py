@@ -43,19 +43,29 @@ class MissionCase:
     C_Lmax: float = 1.0
     TW_TO: float = 0.5           # required takeoff T/W
     # Propulsion
-    c_T: float = 1.25             # 1/hr, cruise TSFC
+    # Engine fits from AMT / JetCat / PBS data (engine weight W in lb):
+    #   max static thrust  T_SL  = T_slope * W + T_int           [lbf]
+    #   TSFC at max thrust c_T   = tsfc_int + tsfc_slope * W      [1/hr]
+    T_slope: float = 7.1
+    T_int: float = 28.6          # lbf
+    tsfc_int: float = 1.617      # 1/hr
+    tsfc_slope: float = -0.0117  # 1/hr per lb
     K_ram: float = 0.5           # ram recovery factor on thrust lapse
-    TW_eng: float = 9.0          # installed engine T/W
     # Aerodynamics
     C_f: float = 0.003
     Swet_S: float = 2.05
-    Swet_fus: float = 12.0       # ft^2
-    CDA_fus_w: float = 0.086     # ft^2
+    # Fuselage: Swet = pi d L, wave drag area = E_WD (9 pi / 2)(A_max / L)^2
+    # (Sears-Haack), A_max = pi d^2 / 4. E_WD = 1.8 reproduces the old 6 ft x 8 in
+    # body (0.086 ft^2).
+    E_WD: float = 1.8
+    d_min: float = 8.0 / 12.0    # ft, minimum fuselage diameter (engine)
+    L_min: float = 4.0           # ft, fuselage length bounds (placeholders)
+    L_max: float = 12.0
     K_ind: float = 1.2
     # Structures / weights
     AR: float = 2.0
     N_ult: float = 6.0
-    K_wing: float = 0.0103 * 2.0
+    K_wing: float = 0.0103       # Raymer fighter wing coefficient (1/cos(sweep) is applied separately)
     tau_min: float = 0.025
     f_other: float = 0.20
     W_fixed: float = 3.0         # lbf
@@ -64,19 +74,25 @@ class MissionCase:
     eta_climb: float = 0.5
     g: float = 32.174            # ft/s^2
     # Atmosphere fit (same as the GP)
-    h_fit: float = 17335.8       # ft
+    h_fit: float = 7720.7        # ft, altitude fit h = h_fit sigma^-h_exp (15,000-25,000 ft, +-2.7%)
+    h_exp: float = 1.4916
     a_SL: float = 1116.4         # ft/s
     a_strat: float = 968.1       # ft/s
-    sig_max: float = 0.4481
-    sig_min: float = 0.1197
-    h_max: float = 40000.0       # ft, max cruise altitude
+    sig_max: float = 0.629         # density at 15,000 ft
+    sig_min: float = 0.4481        # density at 25,000 ft
+    h_max: float = 20000.0       # ft, max cruise altitude
     f_res: float = 0.06
+
+
+def max_sweep_deg(m: MissionCase) -> float:
+    """Most sweep a wing of aspect ratio AR can have as a delta (AR = 4 / tan(sweep))."""
+    return math.degrees(math.atan(4.0 / m.AR))
 
 
 def sigma_floor(m: MissionCase) -> float:
     """Lowest allowed density ratio: the tighter of sig_min and the altitude
-    ceiling, h = h_fit * sigma^-0.5701 <= h_max (same fit as the GP)."""
-    return max(m.sig_min, (m.h_max / m.h_fit) ** (-1 / 0.5701))
+    ceiling, h = h_fit * sigma^-h_exp <= h_max (same fit as the GP)."""
+    return max(m.sig_min, (m.h_max / m.h_fit) ** (-1 / m.h_exp))
 
 
 @dataclass
@@ -85,16 +101,19 @@ class Design:
     sigma: float                 # cruise density ratio (sets altitude)
     tau: float                   # wing t/c
     S_factor: float = 1.0        # wing area / stall-limited minimum area
+    L_fus: float = 6.0           # ft, fuselage length
+    d_fus: float = 8.0 / 12.0    # ft, fuselage diameter
+    sweep_deg: float = 60.0      # deg, wing leading-edge sweep
 
 
-def evaluate_one(W_TO: float, mission: MissionCase, design: Design):
-    """Fly the mission once at a guessed W_TO. Same names as mission_sim.py."""
+def _evaluate(W_TO: float, mission: MissionCase, design: Design, c_T: float):
+    """Fly the mission once at a guessed W_TO and TSFC. Same names as mission_sim.py."""
     m = mission
     sigma, tau = design.sigma, design.tau
 
     # Atmosphere
     rho = m.rho_SL * sigma
-    h = m.h_fit * sigma ** -0.5701
+    h = m.h_fit * sigma ** -m.h_exp
     a = max(m.a_strat, m.a_SL * sigma ** 0.1175)
     V = m.M * a
     q = 0.5 * rho * V ** 2
@@ -109,44 +128,67 @@ def evaluate_one(W_TO: float, mission: MissionCase, design: Design):
 
     # Climb / accel fuel (energy method), c_T converted 1/hr -> 1/s
     W_f_climb = (m.f_TO * W_TO
-                 + (m.c_T / 3600.0) * W_TO * (h + V ** 2 / (2.0 * m.g))
+                 + (c_T / 3600.0) * W_TO * (h + V ** 2 / (2.0 * m.g))
                  / (m.V_climb * m.eta_climb))
     W_cr_start = W_TO - W_f_climb
 
-    # Cruise aerodynamics (lift = weight at start of the supersonic leg)
+    # Level-flight aerodynamics (lift = weight at start of the Mach 1 segment)
     C_L = W_cr_start / (q * S)
-    C_D0 = m.C_f * m.Swet_S + m.C_f * m.Swet_fus / S
-    C_Dw = K_wave * tau ** 2 + m.CDA_fus_w / S
+    Swet_fus = math.pi * design.d_fus * design.L_fus
+    CDA_fus_w = m.E_WD * 4.5 * math.pi * (math.pi * design.d_fus ** 2 / 4.0 / design.L_fus) ** 2
+    C_D0 = m.C_f * m.Swet_S + m.C_f * Swet_fus / S
+    cos_sw = math.cos(math.radians(design.sweep_deg))
+    # Wing wave drag: simple sweep theory, thickness drag scales with cos^2(sweep)
+    # (normal Mach floor held at 1.2, like the unswept model); fuselage unchanged
+    C_Dw = K_wave * tau ** 2 * cos_sw ** 2 + CDA_fus_w / S
     C_D = C_D0 + C_Dw + m.K_ind * K_sup * C_L ** 2
     D = q * C_D * S
 
-    # Engine sized by the worse of takeoff T/W and cruise thrust
-    T_SL = max(m.TW_TO * W_TO, D / lapse)
+    # Power-based segment: level flight, thrust = drag, power = T V
+    T_seg = D                                            # thrust required
+    P_req = T_seg * V / 550.0                            # hp
+
+    # Engine sized by the worse of takeoff T/W and segment thrust
+    T_SL = max(m.TW_TO * W_TO, T_seg / lapse)
 
     # Empty weight build-up
     W_wing = (m.K_wing * math.sqrt(m.N_ult * W_TO) * S ** 0.622
-              * m.AR ** 0.785 * tau ** -0.4)
-    W_eng = T_SL / m.TW_eng
+              * m.AR ** 0.785 * tau ** -0.4 / cos_sw)
+    W_eng = max(T_SL - m.T_int, 0.0) / m.T_slope          # engine weight from the thrust fit
     W_other = m.W_fixed + m.f_other * W_TO
     W_empty = W_wing + W_eng + W_other
     W_ZF = m.W_pay + W_empty
 
-    # Reserve and Breguet supersonic leg
+    # Reserve, and segment fuel = TSFC * thrust * time (no Breguet)
     W_f_res = m.f_res * W_ZF
     W_cr_end = W_ZF + W_f_res
-    z_bre = (m.t_super / 3600.0) * m.c_T * C_D / C_L
-    W_f_cruise = W_cr_end * (z_bre + z_bre ** 2 / 2 + z_bre ** 3 / 6 + z_bre ** 4 / 24)
+    W_f_cruise = (c_T / 3600.0) * T_seg * m.t_super
 
     return {
         "W_TO": W_TO, "W_ZF": W_ZF, "W_empty": W_empty, "W_wing": W_wing,
         "W_eng": W_eng, "W_other": W_other, "W_f_climb": W_f_climb,
-        "W_f_cruise": W_f_cruise, "W_f_res": W_f_res, "W_cr_start": W_cr_start,
+        "W_f_cruise": W_f_cruise, "c_T": c_T, "L_fus": design.L_fus, "d_fus": design.d_fus,
+        "Swet_fus": Swet_fus, "CDA_fus_w": CDA_fus_w, "sweep_deg": design.sweep_deg, "cos_sw": cos_sw, "W_f_res": W_f_res, "W_cr_start": W_cr_start,
         "W_cr_end": W_cr_end, "S": S, "tau": tau, "C_L": C_L, "C_D": C_D,
-        "C_D0": C_D0, "C_Dw": C_Dw, "D": D, "T_SL": T_SL, "z_bre": z_bre,
+        "C_D0": C_D0, "C_Dw": C_Dw, "D": D, "T_SL": T_SL, "T_seg": T_seg, "P_req": P_req,
         "h": h, "rho": rho, "a": a, "lapse": lapse,
         # build-up: what the mission says W_TO has to be
         "W_TO_calc": W_ZF + W_f_climb + W_f_cruise + W_f_res,
     }
+
+
+def evaluate_one(W_TO: float, mission: MissionCase, design: Design):
+    """TSFC depends on engine weight, which depends on thrust, which depends on
+    the climb fuel (via TSFC): iterate c_T to a fixed point."""
+    m = mission
+    c_T = m.tsfc_int + m.tsfc_slope * 20.0
+    for _ in range(100):
+        r = _evaluate(W_TO, m, design, c_T)
+        c_new = m.tsfc_int + m.tsfc_slope * r["W_eng"]
+        if abs(c_new - c_T) < 1e-12:
+            break
+        c_T = c_new
+    return r
 
 
 def size_drone(mission: MissionCase, design: Design, W0_guess: float = 50.0,
@@ -175,29 +217,39 @@ def size_drone(mission: MissionCase, design: Design, W0_guess: float = 50.0,
 
 
 def _closed_weight(x, mission: MissionCase):
-    """Objective for the optimizer: closed W_TO, big penalty if it won't close."""
+    """Objective for the optimizer: closed W_TO, big penalty if it won't close.
+    W_max is not enforced here, so a design that is too heavy is still reported
+    (print_report flags it NOT CLOSED)."""
     r = size_drone(mission, Design(*x))
-    return r["W_TO"] if r["feasible"] else 1e3
+    return r["W_TO"] if r["converged"] else 1e3
 
 
-def sweep_designs(mission: MissionCase, n_sigma=25, n_tau=9, n_S=9): #NO idea how this works
-    """Carpet sweep over altitude, t/c and wing size, then polish the best point."""
+def sweep_designs(mission: MissionCase, n_sigma=25, n_tau=5, n_S=5, n_L=7, n_sw=5):
+    """Carpet sweep over altitude, t/c, wing size and fuselage length (diameter at
+    its minimum), then polish the best point with diameter free too."""
     sig_grid = np.geomspace(sigma_floor(mission), mission.sig_max, n_sigma)
     tau_grid = np.linspace(mission.tau_min, 0.08, n_tau)
     Sf_grid = np.linspace(1.0, 2.0, n_S)
+    L_grid = np.linspace(mission.L_min, mission.L_max, n_L)
+    sw_grid = np.linspace(0.0, max_sweep_deg(mission), n_sw)
 
     best_x, best_W = None, math.inf
     for sig in sig_grid:
         for tau in tau_grid:
             for Sf in Sf_grid:
-                W = _closed_weight((sig, tau, Sf), mission)
-                if W < best_W:
-                    best_x, best_W = (sig, tau, Sf), W
-    if best_x is None or best_W >= mission.W_max:
-        raise RuntimeError("No design in the sweep closes under W_max")
+                for L in L_grid:
+                    for sw in sw_grid:
+                        x = (sig, tau, Sf, L, mission.d_min, sw)
+                        W = _closed_weight(x, mission)
+                        if W < best_W:
+                            best_x, best_W = x, W
+    if best_x is None or best_W >= 1e3:
+        raise RuntimeError("No design in the sweep converges")
 
     # Local polish within the same bounds the GP uses
-    bounds = [(sigma_floor(mission), mission.sig_max), (mission.tau_min, 0.2), (1.0, 5.0)]
+    bounds = [(sigma_floor(mission), mission.sig_max), (mission.tau_min, 0.2), (1.0, 5.0),
+              (mission.L_min, mission.L_max), (mission.d_min, 2.0),
+              (0.0, max_sweep_deg(mission))]
     res = minimize(_closed_weight, best_x, args=(mission,), method="L-BFGS-B",
                    bounds=bounds, options={"ftol": 1e-14, "gtol": 1e-10})
     x_opt = res.x if res.fun <= best_W else best_x
@@ -216,8 +268,8 @@ def drag_at_speed(V, result, mission: MissionCase):
     q = 0.5 * result["rho"] * V ** 2
     S, tau = result["S"], result["tau"]
     C_L = result["W_cr_start"] / (q * S)
-    C_D = (m.C_f * m.Swet_S + m.C_f * m.Swet_fus / S
-           + K_wave * tau ** 2 + m.CDA_fus_w / S
+    C_D = (m.C_f * m.Swet_S + m.C_f * result["Swet_fus"] / S
+           + K_wave * tau ** 2 + result["CDA_fus_w"] / S
            + m.K_ind * K_sup * C_L ** 2)
     return q * C_D * S
 
@@ -265,12 +317,12 @@ def print_report(result, design: Design, mission: MissionCase):
     print()
     print("Variables")
     print("---------")
-    units = {"a": "ft/s", "D": "lbf", "h": "ft", "rho": "slug/ft**3",
-             "S": "ft**2", "T_SL": "lbf"}
+    units = {"a": "ft/s", "c_T": "1/hr", "D": "lbf", "h": "ft", "rho": "slug/ft**3",
+             "S": "ft**2", "T_SL": "lbf", "T_seg": "lbf", "P_req": "hp"}
     for key in ["a", "C_D", "C_D0", "C_Dw", "C_L", "D", "h", "lapse", "rho",
-                "S", "T_SL", "tau", "W_cr_end", "W_cr_start", "W_empty",
+                "S", "T_SL", "tau", "c_T", "W_cr_end", "W_cr_start", "W_empty",
                 "W_eng", "W_f_climb", "W_f_cruise", "W_f_res", "W_other",
-                "W_TO", "W_wing", "W_ZF", "z_bre"]:
+                "W_TO", "W_wing", "W_ZF", "T_seg", "P_req"]:
         unit = units.get(key, "lbf" if key.startswith("W_") else "-")
         print(f"   {key:10s} : {result[key]:12.4f}   [{unit}]")
     print()
@@ -279,7 +331,12 @@ def print_report(result, design: Design, mission: MissionCase):
     print(f"   sigma      : {design.sigma:12.4f}   (bounds {sigma_floor(mission):.4f} - {mission.sig_max}, h <= {mission.h_max:,.0f} ft)")
     print(f"   tau        : {design.tau:12.4f}   (min {mission.tau_min})")
     print(f"   S / S_stall: {design.S_factor:12.4f}")
-    sizing = "cruise thrust" if result["T_SL"] > mission.TW_TO * result["W_TO"] + 1e-9 else "takeoff T/W"
+    print(f"   sweep [deg]: {design.sweep_deg:12.4f}   (max {max_sweep_deg(mission):.1f} = delta with AR {mission.AR:g})")
+    print(f"   L_fus      : {design.L_fus:12.4f}   [ft]  (bounds {mission.L_min:g} - {mission.L_max:g})")
+    print(f"   d_fus      : {design.d_fus:12.4f}   [ft]  (min {mission.d_min:.4f} = {mission.d_min * 12:.0f} in)")
+    print(f"   Swet_fus   : {result['Swet_fus']:12.4f}   [ft^2]")
+    print(f"   CDA_fus_w  : {result['CDA_fus_w']:12.4f}   [ft^2]")
+    sizing = "Mach 1 segment thrust" if result["T_SL"] > mission.TW_TO * result["W_TO"] + 1e-9 else "takeoff T/W"
     print(f"   Engine sized by {sizing}")
     print()
     print("Constants")
@@ -289,7 +346,7 @@ def print_report(result, design: Design, mission: MissionCase):
     print()
     print(f"Fuel fraction   : {(result['W_f_climb'] + result['W_f_cruise'] + result['W_f_res']) / result['W_TO']:.3f}")
     print(f"Empty fraction  : {result['W_empty'] / result['W_TO']:.3f}")
-    print(f"Cruise L/D      : {result['C_L'] / result['C_D']:.2f}")
+    print(f"Segment L/D      : {result['C_L'] / result['C_D']:.2f}")
     print(f"Closure residual: {abs(result['W_TO_calc'] - result['W_TO']):.2e} lbf")
     print("\nPost Solve Report")
     print("-----------------")
@@ -318,7 +375,7 @@ if __name__ == "__main__":
     # Altitude sweep at the optimal t/c and wing size
     h_list, W_list = [], []
     for sig in sig_grid:
-        r = size_drone(mission, Design(sig, design.tau, design.S_factor))
+        r = size_drone(mission, Design(sig, design.tau, design.S_factor, design.L_fus, design.d_fus, design.sweep_deg))
         if r["converged"]:
             h_list.append(r["h"])
             W_list.append(r["W_TO"])
@@ -338,3 +395,4 @@ if __name__ == "__main__":
     plot_drag_vs_velocity(result, mission)
 
     print("\nPlots saved to weight_convergence.png, mission_sweep.png and drag_vs_velocity.png")
+
