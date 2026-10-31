@@ -7,7 +7,7 @@
 #
 #   python sensitivity.py
 #
-# Outputs: sensitivity_tornado.png  (+/-20 % on every constant)
+# Outputs (in plots/sensitivity/): sensitivity_tornado.png  (+/-20 % on every constant)
 #          sensitivity_curves.png   (W_TO vs four levers)
 #          sensitivity_vstall.png   (W_TO vs stall speed, for several C_Lmax)
 # Also prints the value of each lever that would close at W_max on its own.
@@ -21,7 +21,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from missionsweep import Design, MissionCase, max_sweep_deg, size_drone, sigma_floor
+from missionsweep import Design, MissionCase, max_sweep_deg, plot_path, size_drone, sigma_floor
 
 H_TARGET = 30000.0           # ft, altitude the sensitivities are taken at
 W_MAX = 55.0                 # lbf
@@ -123,7 +123,7 @@ def tornado(W0):
     ax.set_title(f"Weight sensitivity at {H_TARGET:,.0f} ft (nominal W_TO = {W0:.1f} lbf)", loc="left")
     ax.legend(frameon=False, loc="lower right", labelcolor=INK2)
     fig.tight_layout()
-    fig.savefig("sensitivity_tornado.png", dpi=150)
+    fig.savefig(plot_path("sensitivity", "sensitivity_tornado.png"), dpi=150)
     plt.close(fig)
     return rows
 
@@ -158,7 +158,7 @@ def curves(W0, levers):
             print(f"   {name:10s}: cannot close alone within {xs[0]:.3g} - {xs[-1]:.3g}")
     fig.suptitle(f"Levers on closed W_TO at {H_TARGET:,.0f} ft", x=0.02, ha="left", color=INK)
     fig.tight_layout()
-    fig.savefig("sensitivity_curves.png", dpi=150)
+    fig.savefig(plot_path("sensitivity", "sensitivity_curves.png"), dpi=150)
     plt.close(fig)
 
 
@@ -197,7 +197,7 @@ def vstall_plot(W0, cl_list=(1.0, 1.2, 1.4), colors=(C_DOWN, C_UP, "#1a9e77")):
     ax.set_title(f"Stall-speed sensitivity at {H_TARGET:,.0f} ft", loc="left", pad=28)
     ax.legend(frameon=False, loc="upper right", labelcolor=INK2)
     fig.tight_layout()
-    fig.savefig("sensitivity_vstall.png", dpi=150)
+    fig.savefig(plot_path("sensitivity", "sensitivity_vstall.png"), dpi=150)
     plt.close(fig)
 
 
@@ -210,4 +210,4 @@ if __name__ == "__main__":
         print(f"   {label:34s} -{SWING:.0%}: {lo:+6.2f}   +{SWING:.0%}: {hi:+6.2f}")
     curves(W0, ["E_WD", "K_ram", "d_min", "f_other"])
     vstall_plot(W0)
-    print("\nSaved sensitivity_tornado.png, sensitivity_curves.png and sensitivity_vstall.png")
+    print("\nSaved sensitivity_tornado.png, sensitivity_curves.png and sensitivity_vstall.png to plots/sensitivity/")

@@ -38,5 +38,7 @@ if __name__ == "__main__":
     ax.grid(True, alpha=0.3)
     ax.legend()
     fig.tight_layout()
-    fig.savefig(HERE / "altitude_sweep.png", dpi=150)
-    print("Saved altitude_sweep.png")
+    out = HERE / "plots" / "mission"
+    out.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out / "altitude_sweep.png", dpi=150)
+    print("Saved plots/mission/altitude_sweep.png")

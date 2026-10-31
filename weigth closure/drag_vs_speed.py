@@ -1,14 +1,14 @@
 # Drag vs velocity for the optimized aircraft at its design altitude:
 # total, parasitic (friction + wave, zero-lift) and induced (lift-dependent),
 # plus the thrust available. Same drag model as missionsweep.py.
-#   python drag_vs_speed.py          -> drag_vs_speed.png
+#   python drag_vs_speed.py          -> plots/drag/drag_vs_speed.png
 import numpy as np
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from missionsweep import MissionCase, size_drone, sweep_designs
+from missionsweep import MissionCase, plot_path, size_drone, sweep_designs
 
 INK, INK2, GRID, SURFACE = "#1f2328", "#59636e", "#e6e6e6", "#fcfcfb"
 C_TOTAL, C_PARA, C_IND = "#2a73d4", "#e8693a", "#1a9e77"
@@ -74,11 +74,11 @@ if __name__ == "__main__":
                  loc="left", color=INK, pad=28)
     ax.legend(frameon=False, labelcolor=INK2, loc="upper right")
     fig.tight_layout()
-    fig.savefig("drag_vs_speed.png", dpi=150)
+    fig.savefig(plot_path("drag", "drag_vs_speed.png"), dpi=150)
     plt.close(fig)
 
     print(f"{'Mach':>5} {'V [ft/s]':>9} {'total':>7} {'parasitic':>10} {'induced':>8}")
     for M in (0.5, 0.8, 1.0, 1.2, 1.5, 2.0):
         p, i = drag_parts(M * a, res, m)
         print(f"{M:5.1f} {M * a:9.0f} {p + i:7.1f} {p:10.1f} {i:8.1f}")
-    print(f"Thrust available {T_avail:.1f} lbf. Saved drag_vs_speed.png")
+    print(f"Thrust available {T_avail:.1f} lbf. Saved plots/drag/drag_vs_speed.png")

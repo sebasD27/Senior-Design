@@ -134,8 +134,10 @@ def main():
     args = parser.parse_args()
 
     df, u = load(args.csv, args.metric)
-    # PNGs are named after the CSV, e.g. engine_catalogue_weight_vs_thrust.png
-    out_base = args.csv.resolve().parent / args.csv.stem
+    # PNGs go in plots/, named after the CSV, e.g. plots/engine_catalogue_weight_vs_thrust.png
+    out_dir = here / "plots"
+    out_dir.mkdir(exist_ok=True)
+    out_base = out_dir / args.csv.stem
 
     makers = sorted(df["manufacturer"].unique())
     who = makers[0] if len(makers) == 1 else ", ".join(makers[:-1]) + " & " + makers[-1]

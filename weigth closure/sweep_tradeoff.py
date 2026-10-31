@@ -3,7 +3,7 @@
 # area, fuselage length, altitude pinned at the ceiling) is re-optimized and the
 # weight re-closed. Sweep is limited to a delta of aspect ratio AR.
 #
-#   python sweep_tradeoff.py          -> sweep_tradeoff.png
+#   python sweep_tradeoff.py          -> plots/sweep/sweep_tradeoff.png
 import numpy as np
 from scipy.optimize import minimize
 
@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from missionsweep import Design, MissionCase, max_sweep_deg, sigma_floor, size_drone
+from missionsweep import Design, MissionCase, max_sweep_deg, plot_path, sigma_floor, size_drone
 
 INK, INK2, GRID, SURFACE, BLUE = "#1f2328", "#59636e", "#e6e6e6", "#fcfcfb", "#2a73d4"
 
@@ -63,9 +63,9 @@ if __name__ == "__main__":
     fig.suptitle(f"Wing sweep trade at 20,000 ft (delta limit {max_sweep_deg(m):.1f}° for AR {m.AR:g})",
                  x=0.02, ha="left", color=INK)
     fig.tight_layout()
-    fig.savefig("sweep_tradeoff.png", dpi=150)
+    fig.savefig(plot_path("sweep", "sweep_tradeoff.png"), dpi=150)
 
     print(f"{'sweep':>6} {'W_TO':>7} {'drag':>7} {'wing wave':>10} {'W_wing':>7}")
     for w, a, b, c, d in zip(sweeps, W, D, wave_wing, W_wing):
         print(f"{w:6.1f} {a:7.2f} {b:7.1f} {c:10.1f} {d:7.2f}")
-    print("Saved sweep_tradeoff.png")
+    print("Saved plots/sweep/sweep_tradeoff.png")

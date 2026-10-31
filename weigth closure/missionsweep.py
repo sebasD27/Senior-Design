@@ -22,6 +22,7 @@
 # =================
 import math
 from dataclasses import dataclass, fields
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import minimize
@@ -274,7 +275,17 @@ def drag_at_speed(V, result, mission: MissionCase):
     return q * C_D * S
 
 
-def plot_drag_vs_velocity(result, mission: MissionCase, fname="drag_vs_velocity.png"):
+PLOT_DIR = Path(__file__).resolve().parent / "plots"
+
+
+def plot_path(group: str, name: str) -> Path:
+    """plots/<group>/<name>, creating the folder if needed."""
+    d = PLOT_DIR / group
+    d.mkdir(parents=True, exist_ok=True)
+    return d / name
+
+
+def plot_drag_vs_velocity(result, mission: MissionCase, fname=None):
     a = result["a"]
     V = np.linspace(0.3 * a, 2.0 * a, 400)
     D = drag_at_speed(V, result, mission)
@@ -300,7 +311,7 @@ def plot_drag_vs_velocity(result, mission: MissionCase, fname="drag_vs_velocity.
     ax.grid(True, alpha=0.3)
     ax.legend()
     fig.tight_layout()
-    fig.savefig(fname, dpi=150)
+    fig.savefig(fname or plot_path("drag", "drag_vs_velocity.png"), dpi=150)
     plt.close(fig)
 
 
@@ -369,7 +380,7 @@ if __name__ == "__main__":
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig("weight_convergence.png", dpi=150)
+    plt.savefig(plot_path("mission", "weight_convergence.png"), dpi=150)
     plt.close()
 
     # Altitude sweep at the optimal t/c and wing size
@@ -389,10 +400,10 @@ if __name__ == "__main__":
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig("mission_sweep.png", dpi=150)
+    plt.savefig(plot_path("mission", "mission_sweep.png"), dpi=150)
     plt.close()
 
     plot_drag_vs_velocity(result, mission)
 
-    print("\nPlots saved to weight_convergence.png, mission_sweep.png and drag_vs_velocity.png")
+    print("\nPlots saved to plots/mission/ (weight_convergence, mission_sweep) and plots/drag/drag_vs_velocity.png")
 

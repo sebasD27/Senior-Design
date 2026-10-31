@@ -7,7 +7,7 @@
 # wetted area and skin friction (~L). Weight is NOT re-closed here, so the drag
 # minimum can sit slightly away from the weight-optimal length.
 #
-#   python drag_vs_length.py          -> drag_vs_length.png
+#   python drag_vs_length.py          -> plots/drag/drag_vs_length.png
 import math
 
 import numpy as np
@@ -16,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from missionsweep import MissionCase, size_drone, sweep_designs
+from missionsweep import MissionCase, plot_path, size_drone, sweep_designs
 
 INK, INK2, GRID, SURFACE = "#1f2328", "#59636e", "#e6e6e6", "#fcfcfb"
 C_TOTAL, C_FRIC, C_WAVE = "#2a73d4", "#e8693a", "#1a9e77"
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     ax.yaxis.label.set_color(INK2)
     ax.legend(frameon=False, labelcolor=INK2, loc="upper right")
     fig.tight_layout()
-    fig.savefig("drag_vs_length.png", dpi=150)
+    fig.savefig(plot_path("drag", "drag_vs_length.png"), dpi=150)
     plt.close(fig)
 
     print(f"Fixed aircraft: S = {res['S']:.2f} ft^2, t/c = {res['tau']:.3f}, W = {res['W_cr_start']:.1f} lbf")
@@ -82,4 +82,4 @@ if __name__ == "__main__":
     for l in np.linspace(m.L_min, m.L_max, 9):
         f_, w_, li = drag_components(l, d, res, m)
         print(f"{l:8.1f} {f_ + w_ + li:8.1f} {f_:9.1f} {w_:8.1f}")
-    print("Saved drag_vs_length.png")
+    print("Saved plots/drag/drag_vs_length.png")
