@@ -1,0 +1,4 @@
+# Tested LCsolver revision from the user-provided repository.
+lcsolver @ git+https://github.com/codykarcher/lcsolver.git@ee29f392904e48f92902b57638278e32458265c8
+matplotlib>=3.9
+pytest>=8

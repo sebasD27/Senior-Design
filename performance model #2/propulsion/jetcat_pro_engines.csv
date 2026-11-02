@@ -1,0 +1,12 @@
+engine,thrust_max_N,thrust_idle_N,weight_g,sfc_kg_per_N_h,thrust_max_lbf,weight_lb,tsfc_lb_per_lbf_h,thrust_to_weight,source_note
+P190-PRO-S,190,8.0,1900,0.158,42.7,4.19,1.549,10.2,jetcat.de product page
+P220-PRO,220,9.0,1850,0.158,49.5,4.08,1.549,12.13,jetcat.de product page (P220-PRO-S2-R1.2 listing)
+P250-PRO-S,250,11.8,2155,0.158,56.2,4.75,1.549,11.83,jetcat.de product page (P250-PRO-S-V2)
+P350-PRO-S,360,15.5,2890,0.158,80.9,6.37,1.549,12.7,jetcat.de product page
+P400-PRO-LN,425,14.0,4010,0.157,95.5,8.84,1.54,10.81,"jetcat.de product page (GL-LN variant: 4060 g, 0.158)"
+P420-PRO-S-R,425,36.0,4100,0.151,95.5,9.04,1.481,10.57,jetcat.de product page (generator + rectifier)
+P500-PRO-S,492,28.0,5400,0.151,110.6,11.9,1.481,9.29,jetcat.de product page (GL/GH-type variants list 4900 g)
+P550-PRO-S,550,28.0,4900,0.144,123.6,10.8,1.412,11.45,JetCat P550-PRO datasheet V1.1 02/2023
+P650-PRO-S-R,650,30.0,6000,0.139,146.1,13.23,1.363,11.05,jetcat.de product page (generator + rectifier)
+P900-PRO-S-O-R,900,34.0,9900,0.138,202.3,21.83,1.353,9.27,jetcat.de product page (outrunner generator + rectifier)
+P1000-PRO,1100,45.0,11000,0.127,247.3,24.25,1.245,10.2,jetcat.de product page
