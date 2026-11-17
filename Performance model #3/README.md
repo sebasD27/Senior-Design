@@ -47,16 +47,21 @@ a quarter of the drag; the testDrone CAD values are much lower.
 
 ### Studies (`weigth closure/studies/`)
 
-`lowest_altitude.py` (lowest dash altitude that closes; pin an engine in `inputs.py`), `sweep_lapse.py`,
-`sweep_tradeoff.py`, `sensitivity.py`, `drag_vs_length.py`, `drag_vs_speed.py`. Plots go to
-`weigth closure/plots/`.
+Both read their baseline from `inputs.py`, relax the weight cap to 150 lb, and write a PNG and a CSV to
+`weigth closure/plots/studies/`. Shared setup is in `_common.py`.
+
+| Script | What it answers |
+|---|---|
+| `weight_vs_altitude.py` | Closed W_TO vs dash altitude for the P220, P400, P550, P900 and P1000 (q limit lifted, its altitude shaded); lowest dash altitude under 55 lb per engine |
+| `tornado.py` | Change in W_TO for -20 % / +20 % on each of 26 constants at the `inputs.py` dash altitude, with a continuously scalable copy of the `inputs.py` engine |
 
 ## Running
 
 ```bash
 cd "weigth closure"
 python inputs.py                            # the input file: weight, drag and planform report + plot
-python studies/lowest_altitude.py           # lowest closing dash altitude for inputs.py
+python studies/weight_vs_altitude.py        # W_TO vs dash altitude per engine
+python studies/tornado.py                   # +-20 % sensitivity of W_TO
 python mission_sim.py --help                # command-line version and its options
 ```
 
