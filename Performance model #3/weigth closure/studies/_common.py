@@ -20,12 +20,13 @@ from mission_sim import build_mission, solve_mission
 W_CAP = 150.0          # relaxed takeoff-weight cap for exploring the design space
 W_LIMIT = 55.0         # the real requirement (Part 107), drawn as a reference line
 # Catalogue engines spanning the useful range (the continuous engine fit misses designs these close)
-ENGINES = ["P220-PRO", "P400-PRO-LN", "P550-PRO-S", "P900-PRO-S-O-R", "P1000-PRO"]
+ENGINES = ["P220-PRO", "P400-PRO-LN", "P550-PRO-S", "P650-PRO-S-R", "P900-PRO-S-O-R", "P1000-PRO"]
+# (The P850 is in the catalogue as "200 lbf class" only: no weight, TSFC or diameter, so it is not sized.)
 PLOT_DIR = HERE.parent / "plots" / "studies"
 
 # Reference categorical palette (dataviz skill, light mode), fixed order; text and grid in neutral inks
-SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
-MARKERS = ["o", "s", "^", "D", "v"]
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
+MARKERS = ["o", "s", "^", "h", "D", "v"]
 SURFACE, INK, INK_2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 
 

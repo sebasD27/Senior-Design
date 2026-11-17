@@ -1,37 +1,61 @@
 # Study 3: closed takeoff weight vs dash altitude, one curve per catalogue engine.
 # How low can each engine dash, and what does a lower dash cost in weight? Everything else is inputs.py,
 # with the weight cap relaxed to 150 lb and the dynamic-pressure limit lifted (its altitude is drawn).
-#   python studies/weight_vs_altitude.py                    # 0 - 36,000 ft every 2,000 ft
+#   python studies/weight_vs_altitude.py                    # 0 - 36,000 ft every 1,000 ft
 #   python studies/weight_vs_altitude.py 10000 36000 1000
+#   python studies/weight_vs_altitude.py --replot            # redraw from the last CSV
 import csv
 import math
 import sys
 
 import numpy as np
 
+from concurrent.futures import ProcessPoolExecutor
+
 from _common import (ENGINES, INK_2, MARKERS, SERIES, W_CAP, W_LIMIT, PLOT_DIR, altitude_at_q, baseline,
-                     plt, run_all, save, style)
+                     plt, save, solve, style)
+
+
+def descend(args):
+    """One engine, highest altitude first; each solve starts from the last design that closed, so the
+    curve follows the design family down to where the engine runs out of thrust."""
+    engine, heights, m = args
+    out, seed = {}, None
+    for h in sorted(heights, reverse=True):
+        job = ("", h, m, engine) + ((seed,) if seed else ())
+        _, _, _, r, _ = solve(job)
+        out[h] = r
+        seed = r or seed
+    return engine, out
 
 if __name__ == "__main__":
-    lo, hi, step = (float(x) for x in sys.argv[1:4]) if len(sys.argv) > 3 else (0.0, 36000.0, 2000.0)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    lo, hi, step = (float(x) for x in args[:3]) if len(args) > 2 else (0.0, 36000.0, 1000.0)
     heights = [float(h) for h in np.arange(lo, hi + 1, step)]
     q_user = baseline().q_max
     m = baseline(q_max=math.inf)
-    results = run_all([("", h, m, e) for e in ENGINES for h in heights])
-
-    table = {e: {} for e in ENGINES}
-    for _, h, e, r, _ in results:
-        table[e][h] = r
+    if "--replot" in sys.argv:          # redraw from the last CSV without solving
+        table = {e: {h: None for h in heights} for e in ENGINES}
+        with open(PLOT_DIR / "weight_vs_altitude.csv") as f:
+            for row in csv.DictReader(f):
+                if row["engine"] in table and row["W_TO_lb"]:
+                    table[row["engine"]][float(row["altitude_ft"])] = {"W_TO": float(row["W_TO_lb"])}
+        replot = True
+    else:
+        with ProcessPoolExecutor(max_workers=len(ENGINES)) as pool:
+            table = dict(pool.map(descend, [(e, heights, m) for e in ENGINES]))
+        replot = False
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
-    with open(PLOT_DIR / "weight_vs_altitude.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["engine", "altitude_ft", "W_TO_lb", "S_ft2", "L_fus_ft", "d_fus_in", "drag_lbf", "fuel_lb"])
-        for e in ENGINES:
-            for h in heights:
-                r = table[e][h]
-                w.writerow([e, h] + ([round(r["W_TO"], 3), round(r["S"], 4), round(r["L_fus"], 3),
-                                      round(r["d_fus"] * 12, 2), round(r["D"], 2),
-                                      round(r["W_TO"] - r["W_ZF"], 3)] if r else ["", "", "", "", "", ""]))
+    if not replot:
+        with open(PLOT_DIR / "weight_vs_altitude.csv", "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["engine", "altitude_ft", "W_TO_lb", "S_ft2", "L_fus_ft", "d_fus_in", "drag_lbf", "fuel_lb"])
+            for e in ENGINES:
+                for h in heights:
+                    r = table[e][h]
+                    w.writerow([e, h] + ([round(r["W_TO"], 3), round(r["S"], 4), round(r["L_fus"], 3),
+                                          round(r["d_fus"] * 12, 2), round(r["D"], 2),
+                                          round(r["W_TO"] - r["W_ZF"], 3)] if r else ["", "", "", "", "", ""]))
 
     print(f"Closed W_TO (lb) vs dash altitude, Mach {m.M:g}, cap {W_CAP:g} lb ('-' = no design under the cap)")
     print("  altitude " + "".join(f"{e.split('-')[0]:>9s}" for e in ENGINES))
@@ -44,15 +68,20 @@ if __name__ == "__main__":
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
     style(ax, f"Closed takeoff weight vs dash altitude (Mach {m.M:g}, inputs.py, {m.accel_margin:.0%} thrust margin)")
+    ends = []
     for i, e in enumerate(ENGINES):
         pts = [(h / 1000, table[e][h]["W_TO"]) for h in heights if table[e][h]]
         if not pts:
             continue
         xs, ys = zip(*pts)
         ax.plot(xs, ys, color=SERIES[i], marker=MARKERS[i], markersize=6, linewidth=2,
-                markeredgecolor="#fcfcfb", markeredgewidth=1.5, label=e)
-        ax.annotate(e.split("-")[0], (xs[-1], ys[-1]), xytext=(6, 0), textcoords="offset points",
-                    va="center", fontsize=9, color=INK_2)
+                markeredgecolor="#fcfcfb", markeredgewidth=1.0, label=e)
+        ends.append([ys[-1], xs[-1], e.split("-")[0]])
+    ends.sort()                          # direct labels at the line ends, pushed apart by >= 1.6 lb
+    for k in range(1, len(ends)):
+        ends[k][0] = max(ends[k][0], ends[k - 1][0] + 1.6)
+    for y, x, name in ends:
+        ax.annotate(name, (x, y), xytext=(6, 0), textcoords="offset points", va="center", fontsize=9, color=INK_2)
     ax.axhline(W_LIMIT, color=INK_2, linestyle="--", linewidth=1)
     ax.annotate(f"{W_LIMIT:g} lb limit", (lo / 1000, W_LIMIT), xytext=(4, 4), textcoords="offset points",
                 fontsize=9, color=INK_2)

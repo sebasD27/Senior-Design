@@ -364,6 +364,9 @@ def solve_mission(model, initial_state=None):
     """
     import lcsolver
     if model.mission.engine_model:
+        for name, value in (initial_state or {}).items():    # optional starting point (e.g. a nearby solution)
+            if name in model.variables and np.isfinite(value) and value > 0:
+                model.variables[name].set_value(float(value))
         sol = lcsolver.solve(model.formulation)
         return model, sol, solution_state(model,sol)
     starts = [("small-aircraft guess",empirical_start(model)),

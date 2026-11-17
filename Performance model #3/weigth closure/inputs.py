@@ -15,10 +15,10 @@ from missionsweep import MissionCase
 # ======================
 # Mission and run setup
 # ======================
-ALTITUDE = 30000.0       # lowest closing dash altitude with the P400 (studies/lowest_altitude.py); was None
+ALTITUDE = 17000.0       # lowest dash altitude under 55 lb within q_max 800 psf (P650, studies/weight_vs_altitude.py)
 #   dash altitude, ft. None: the GP chooses it (troposphere only, within the
                          # limits below), then re-solves the exact model there. A number pins it.
-ENGINE = "P400-PRO-LN"   # pinned: the continuous fit misses designs a real engine closes; was None
+ENGINE = "P650-PRO-S-R"  # pinned: closes under 55 lb down to 15,000 ft (P400: 30,000 ft)
 #   None: continuous engine fits. "auto": size around every catalogue engine and
                          # keep the lightest aircraft. A name, e.g. "P1000-PRO": pin that engine.
 

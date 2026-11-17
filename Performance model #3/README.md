@@ -11,10 +11,14 @@ lapse with installed-thrust losses, engine clearance, dynamic-pressure limit, th
 
 ## Current design (`python inputs.py`)
 
-39.9 lb, JetCat P400-PRO-LN, Mach 1 dash at 30,000 ft (the lowest altitude that closes with these
-inputs), 5 % thrust margin. Wing 1.55 ft^2, AR 2, 63 deg LE sweep (delta limit), t/c 0.03; fuselage
-7.4 ft x 6.8 in. Mach 1 drag 37 lbf, L/D 0.97. `k_pod` and `k_fin` are still placeholders that carry about
-a quarter of the drag; the testDrone CAD values are much lower.
+50.3 lb, JetCat P650-PRO-S-R, Mach 1 dash at 17,000 ft: the lowest dash under 55 lb that stays within the
+800 psf `q_max` placeholder (the P650 closes down to 15,000 ft at 52.4 lb; the P400 only to 30,000 ft).
+5 % thrust margin, rail launch with landing on legs, C_Lmax 1.3. Wing 2.01 ft^2, AR 2, span 24.1 in,
+56 deg LE sweep, t/c 0.03; fuselage 8.5 ft x 8.1 in. Mach 1 drag 87 lbf at q 771 psf.
+
+Wing area comes only from the landing stall constraint, S = 2 W_land / (rho_SL V_stall^2 C_Lmax); every other
+effect in the model shrinks the wing. Sweep comes from the drag / wing-weight trade (wing weight uses the
+quarter-chord sweep). No maneuver, wing-fuel or stability requirement sizes the wing yet.
 
 ## Layout
 
