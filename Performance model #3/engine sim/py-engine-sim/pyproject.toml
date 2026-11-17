@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py-engine-sim"
+version = "0.1.0"
+description = "A Python reduced-order turbojet and nozzle simulator inspired by NASA Glenn EngineSim"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Sebastian Duran"}]
+keywords = ["aerospace", "turbojet", "engine", "nozzle", "propulsion", "enginesim"]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+py-engine-sim = "enginesim.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

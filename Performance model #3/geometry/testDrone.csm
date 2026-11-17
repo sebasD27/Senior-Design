@@ -1,0 +1,547 @@
+# ogeeDrone: geometry only
+# - fuselage: ONE smooth BLEND of cross-sections from a pointed tangent-ogive nose, through
+#   the blended wing-body region, to the boattail base (no separate tube, so no coincident
+#   surfaces for the booleans)
+# - ogival (ogee) delta wing: S-curve LE that runs along the fuselage, then sweeps out and curls back
+# - single vertical fin (NACA sections), staggered aft of the wing
+# - blended wing-body: between the wing apex and just behind the TE the sections widen from
+#   round into a thin-edged lens that follows the wing LE and melts into the wing
+# - chin (Fury / F-16 style) pitot inlet with a boundary-layer diverter, S-duct to the
+#   engine face, and (optionally) a flow-through duct out a nozzle in the base
+# - area-ruling controls (coke bottle) and a built-in area-distribution report, see "AREA RULING"
+#
+# Frame (same as superDrone build frame): x aft, y up, wings along z.
+# Units: ft. Nose tip is at x = 0.
+#
+# Ogee leading edge, written as span vs. distance along the LE (Concorde-style S curve).
+# xi runs 0 -> 1 from the apex on the fuselage side to the tip LE:
+#   x_LE = wing:xapex + D*xi
+#   z_LE = z0 + (span - z0) * [ 1 - (1 - xi^hug)^curl ]
+#   z0   = fus:radius - wing:inset  (root section buried just inside the fuselage side)
+#   D    = x of the tip LE - xapex = xte + span*tan(tesweep) - ctip - xapex
+#   hug  > 1 : the LE runs along the fuselage before it turns out (higher = longer run)
+#   curl > 1 : the outboard LE bends back toward streamwise at the tip (higher = more)
+#   hug = curl = 1 gives a plain cropped delta
+# Each side is its own BLEND from z0 to the tip (no shared root plane); the reference
+# quantities extend the root chord (xte - xapex) to the centerline.
+# Trailing edge is straight: x_TE = wing:xte + abs(z)*tan(tesweep)
+
+# ---------------- fuselage ----------------
+DESPMTR   fus:radius   0.30    # cylinder radius (P400: 148 mm engine -> ~6.5-7 in OD)
+DESPMTR   fus:lnose    4.5     # ogive nose length
+DESPMTR   fus:lcyl     3.8     # constant-radius length (holds the whole blended region)
+DESPMTR   fus:ltail    1.5     # boattail length
+DESPMTR   fus:rtail    0.20    # base (nozzle) radius
+CFGPMTR   fus:nnose    10      # nose sections (clustered toward the tip)
+CFGPMTR   fus:ntail    8       # sections from the end of the blended region to the base
+
+# ---------------- ogee wing ----------------
+DESPMTR   wing:span     1.25   # semi-span from the centerline
+DESPMTR   wing:xapex    4.7    # LE apex on the fuselage side (must be on the cylinder)
+DESPMTR   wing:xte      7.5    # trailing-edge x at the centerline
+DESPMTR   wing:ctip     0.30   # tip chord (> 0)
+DESPMTR   wing:yloc     0.0    # vertical position of the wing plane (0 = mid-wing)
+DESPMTR   wing:inset    0.01   # root section sits this far inside the fuselage side
+DESPMTR   wing:tesweep  0.0    # trailing-edge sweep (deg), + = tip aft
+DESPMTR   wing:hug      2.5    # >= 1: how long the LE runs along the fuselage before turning out
+DESPMTR   wing:curl     2.5    # >= 1: how much the outboard LE bends back toward streamwise
+DESPMTR   wing:thickr   0.04   # root thickness / chord (NACA 00xx)
+DESPMTR   wing:thickt   0.04   # tip  thickness / chord
+DESPMTR   wing:sharpte  0      # 0 = blunt (tiny) TE, 1 = sharp TE
+CFGPMTR   wing:nsec     8      # sections per side after the root (nsec+1 per BLEND)
+
+# ---------------- vertical fin ----------------
+DESPMTR   vtail:xroot   7.6    # root LE x (keep aft of the wing TE to spread area)
+DESPMTR   vtail:croot   1.0    # root chord (root sits on the fuselage axis)
+DESPMTR   vtail:height  0.9    # tip height above the fuselage axis
+DESPMTR   vtail:taper   0.4    # tip chord / root chord
+DESPMTR   vtail:sweep   50     # LE sweep (deg)
+DESPMTR   vtail:thick   0.05   # thickness / chord
+DESPMTR   vtail:sharpte 0
+
+# ---------------- blended wing-body region ----------------
+# Each fuselage cross-section (x = const) is
+#   upper:  y =  te + (h - te) * sin(phi)^(2*pt),   lower: y = -te - (h - te) * sin(phi)^(2*pb)
+#   z = w * cos(phi)                                  (pt = pb = 0.5 and w = h -> a circle)
+# Outside the blended region the sections are circles of the nose / cylinder / boattail radius.
+# Inside it the half-width w follows the wing LE inboard (always inside the wing, so the thin
+# edge is buried in it), saturates smoothly at blend:wmax, and returns to round behind the TE.
+CFGPMTR   blend:on      1      # 0 = plain round fuselage (same loft, circles everywhere)
+DESPMTR   blend:k       0.6    # fairing edge sits this fraction of the way from the tube to the wing LE
+DESPMTR   blend:wmax    0.70   # max fairing half-width (ft)
+DESPMTR   blend:hfac    1.04   # half-height / fus:radius in the blended region (>= 1)
+DESPMTR   blend:ptop    1.3    # upper fullness: 0.5 = round, > 1 = thin wing-like edges
+DESPMTR   blend:pbot    0.7    # lower fullness (kept rounder to clear the chin-inlet cowl)
+DESPMTR   blend:xstart  0.1    # blended region starts this far ahead of the wing apex
+DESPMTR   blend:lback   0.8    # length behind the wing TE over which it returns to round
+DESPMTR   blend:te      0.003  # half-thickness of the section edge (scaled down near the nose)
+CFGPMTR   blend:nsec    16     # cross-sections in the blended region
+
+# ---------------- AREA RULING (coke bottle) ----------------
+# Only the fuselage half-WIDTH is reshaped (height untouched), so the belly, chin inlet,
+# diverter and fin root never move. Width multiplier at station x:
+#   s(x) = waist(x) * scale(x)
+#   waist(x) = 1 - depth * cos^2(90 deg * (x - xw)/lw)   for abs(x - xw) < lw, else 1
+#   scale(x) = linear interpolation of ar:scale[1..ar:n] at evenly spaced x from 0 to the base
+# The pinched width never drops below a floor (it can only reach the floor, not cross it):
+#   wing-root range (wing:xapex .. wing:xte):  fus:radius  (keeps the wing root buried;
+#                                               only the blended lens can be pinched there)
+#   from inlet:xface - ar:engfwd to the base:  ar:wmineng  (engine)
+#   elsewhere:                                 ar:wmin     (duct + structure)
+# Values > 1 widen the body (e.g. to fill an underfilled forebody).
+DESPMTR   ar:depth    0.0    # waist depth (0 = off, 0.3 = pinch the width by up to 30 %)
+DESPMTR   ar:xw       6.6    # waist center x (put it where the wing adds the most area)
+DESPMTR   ar:lw       1.2    # waist half-length
+CFGPMTR   ar:n        12     # number of width-scale control stations (0 .. base)
+DIMENSION ar:scale    1  ar:n
+DESPMTR   ar:scale    1.0    # per-station width multipliers (for an optimizer)
+DESPMTR   ar:wmin     0.22   # width floor ahead of the engine (duct + structure)
+DESPMTR   ar:wmineng  0.27   # width floor around the engine (P400 148 mm + casing)
+DESPMTR   ar:engfwd   0.2    # engine floor starts this far ahead of inlet:xface
+
+# area-distribution report: slices the finished aircraft at ar:nslice stations and prints
+#   x, raw slice area, area corrected for the flow-through inlet, Sears-Haack (same L, V)
+# corrected area = slice + duct cavity area - captured streamtube (behind the lip)
+CFGPMTR   ar:report   1      # 1 = slice and print every build (0 = faster builds)
+CFGPMTR   ar:nslice   40
+DIMENSION ar:x        1  ar:nslice
+DIMENSION ar:S        1  ar:nslice
+DIMENSION ar:Seff     1  ar:nslice
+OUTPMTR   ar:x               # slice stations (from the nose tip)
+OUTPMTR   ar:S               # raw slice areas
+OUTPMTR   ar:Seff            # corrected areas (use these for wave drag)
+OUTPMTR   ar:V               # volume under ar:Seff
+OUTPMTR   ar:SmaxEff         # max corrected area
+OUTPMTR   ar:SmaxSH          # max area of Sears-Haack with the same length and volume
+OUTPMTR   ar:dqSH            # Sears-Haack wave drag D/q (linear theory, same L and V)
+
+# ---------------- chin inlet ----------------
+# Sizing (P400, 25k ft, M 1.05): engine flow ~0.50 kg/s -> freestream tube ~0.030 ft^2;
+# static operation wants mouth M < ~0.5 -> ~0.035 ft^2. Target Acap ~0.04 ft^2.
+# The mouth is a superellipse (nsup = 2.5), about 8 % larger than the pi*w*h in inlet:Acap.
+# Forebody turbulent boundary layer at the lip is ~1 in thick -> diverter gap ~0.085 ft;
+# the blended belly sits up to ~0.012 ft below fus:radius, hence 0.095 from fus:radius.
+CFGPMTR   inlet:on        1      # 1 = add the inlet
+CFGPMTR   inlet:through   1      # 1 = flow-through duct out a nozzle in the base
+                                 # 0 = duct ends at the engine face (tagged EngineFace)
+DESPMTR   inlet:xoff      0.4    # lip station, aft of the start of the fuselage cylinder
+DESPMTR   inlet:w         0.16   # mouth semi-width
+DESPMTR   inlet:h         0.075  # mouth semi-height
+DESPMTR   inlet:nsup      2.5    # mouth squareness (2 = ellipse); relaxes to 2 at the engine face
+DESPMTR   inlet:lipt      0.015  # cowl lip thickness (thin for supersonic)
+DESPMTR   inlet:gap       0.095  # diverter: clearance between the cowl top and y = -fus:radius
+DESPMTR   inlet:tdiv      0.03   # diverter plate thickness
+DESPMTR   inlet:blend     0.85   # cowl flares to this fraction of the fuselage radius (< 1);
+                                 # 0.85 makes it cross the belly at ~11 deg instead of ~7 deg
+DESPMTR   inlet:lstraight 0.4    # straight run behind the lip before the S-bend
+DESPMTR   inlet:xface     7.3    # x of the engine face (must be on the cylinder)
+DESPMTR   inlet:efRatio   1.3    # engine-face area / mouth area (subsonic diffuser); match to
+                                 # the engine's intake diameter when you have it
+DESPMTR   inlet:exitRatio 0.8    # nozzle exit area / engine-face area
+
+OUTPMTR   inlet:Acap      # mouth area (ellipse formula)
+OUTPMTR   inlet:Aface     # engine-face area
+OUTPMTR   inlet:Aexit     # nozzle exit area (flow-through only)
+
+# ---------------- derived quantities ----------------
+SET       fus:xcyl1    fus:lnose
+SET       fus:xcyl2    fus:xcyl1+fus:lcyl
+SET       fus:xtail    fus:xcyl2+fus:ltail
+
+SET       wing:R       fus:radius
+SET       wing:z0      wing:R-wing:inset
+SET       wing:xTipLE  wing:xte+wing:span*tand(wing:tesweep)-wing:ctip
+SET       wing:D       wing:xTipLE-wing:xapex
+
+SET       vtail:ctip   vtail:croot*vtail:taper
+SET       vtail:xtip   vtail:xroot+vtail:height*tand(vtail:sweep)
+
+ASSERT    ifpos(fus:radius-fus:rtail,1,0)   1     # boattail closes down
+ASSERT    ifpos(wing:ctip,1,0)              1     # finite tip chord
+ASSERT    ifpos(wing:D,1,0)                 1     # tip LE behind the apex
+ASSERT    ifpos(wing:xapex-fus:lnose+1e-6,1,0)  1 # apex on the cylinder, not the nose
+ASSERT    ifpos(wing:span-fus:radius-0.1,1,0)   1 # wing sticks out of the fuselage
+ASSERT    ifpos(wing:hug-0.999,1,0)         1     # hug  >= 1
+ASSERT    ifpos(wing:curl-0.999,1,0)        1     # curl >= 1
+ASSERT    ifpos(sqrt(wing:R^2-wing:z0^2)-0.5*wing:thickr*(wing:xte-wing:xapex),1,0)  1  # root section buried in the fuselage
+
+# ---------------- reference quantities (numerical, semi-span midpoint rule) ----------------
+OUTPMTR   wing:refArea     # planform area, both sides, measured from the centerline
+OUTPMTR   wing:refSpan     # tip to tip
+OUTPMTR   wing:AR
+OUTPMTR   wing:MAC         # mean aerodynamic chord (REF_LENGTH)
+OUTPMTR   wing:yMAC        # spanwise station of the MAC
+OUTPMTR   wing:xMAC        # x of the MAC leading edge
+OUTPMTR   wing:xRef        # MAC quarter chord (moment reference)
+OUTPMTR   wing:xTipLE
+OUTPMTR   fus:length
+
+SET       ref:A     0
+SET       ref:c2    0
+SET       ref:cz    0
+SET       ref:cx    0
+# inside the fuselage (0 < z < z0): root chord extended to the centerline
+SET       ref:n     20
+SET       ref:dz    wing:z0/ref:n
+PATBEG    k  ref:n
+   SET    ref:z     (k-0.5)*ref:dz
+   SET    ref:xle   wing:xapex
+   SET    ref:c     wing:xte+ref:z*tand(wing:tesweep)-ref:xle
+   SET    ref:A     ref:A+ref:c*ref:dz
+   SET    ref:c2    ref:c2+ref:c^2*ref:dz
+   SET    ref:cz    ref:cz+ref:c*ref:z*ref:dz
+   SET    ref:cx    ref:cx+ref:c*ref:xle*ref:dz
+PATEND
+# exposed panel: step along the LE parameter xi
+SET       ref:n     400
+PATBEG    k  ref:n
+   SET    ref:xia   (k-1)/ref:n
+   SET    ref:xib   k/ref:n
+   SET    ref:za    wing:z0+(wing:span-wing:z0)*(1-(1-ref:xia^wing:hug)^wing:curl)
+   SET    ref:zb    wing:z0+(wing:span-wing:z0)*(1-(1-ref:xib^wing:hug)^wing:curl)
+   SET    ref:dz    ref:zb-ref:za
+   SET    ref:z     0.5*(ref:za+ref:zb)
+   SET    ref:xle   wing:xapex+wing:D*0.5*(ref:xia+ref:xib)
+   SET    ref:c     wing:xte+ref:z*tand(wing:tesweep)-ref:xle
+   SET    ref:A     ref:A+ref:c*ref:dz
+   SET    ref:c2    ref:c2+ref:c^2*ref:dz
+   SET    ref:cz    ref:cz+ref:c*ref:z*ref:dz
+   SET    ref:cx    ref:cx+ref:c*ref:xle*ref:dz
+PATEND
+SET       wing:refArea   2*ref:A
+SET       wing:refSpan   2*wing:span
+SET       wing:AR        wing:refSpan^2/wing:refArea
+SET       wing:MAC       ref:c2/ref:A
+SET       wing:yMAC      ref:cz/ref:A
+SET       wing:xMAC      ref:cx/ref:A
+SET       wing:xRef      wing:xMAC+0.25*wing:MAC
+
+# ---------------- fuselage: one BLEND from the nose point to the base ----------------
+# sharp tangent ogive (circle of radius rho tangent to the cylinder at xcyl1, point at x = 0)
+SET       ogive:rho   (fus:radius^2+fus:lnose^2)/(2*fus:radius)
+SET       ogive:cy    fus:radius-ogive:rho
+SET       fus:length  fus:xtail
+
+SET       f:R    fus:radius
+SET       f:xa   wing:xapex-blend:xstart
+SET       f:xb   wing:xte+blend:lback
+ASSERT    ifpos(f:xa-fus:xcyl1+1e-6,1,0)   1    # blended region starts on the cylinder
+ASSERT    ifpos(fus:xcyl2-f:xb+1e-6,1,0)   1    # ... and ends on it (lengthen fus:lcyl)
+ASSERT    ifpos(blend:wmax-f:R-0.05,1,0)   1    # blended region wider than the cylinder
+ASSERT    ifpos(wing:span-blend:wmax-0.1,1,0)   1  # ... but narrower than the wing
+ASSERT    ifpos(blend:hfac-0.999,1,0)      1    # never lower than the cylinder
+ASSERT    ifpos(ar:n-1.5,1,0)              1    # at least two width-scale stations
+ASSERT    ifpos(ar:wmineng-ar:wmin+1e-9,1,0)  1  # engine floor >= forward floor
+
+MARK
+   POINT     0  0  0
+   PATBEG    isec  fus:nnose+blend:nsec+fus:ntail
+      # ---- station x ----
+      SET       f:i1   isec
+      SET       f:i2   isec-fus:nnose
+      SET       f:i3   isec-fus:nnose-blend:nsec
+      SET       f:x    ifpos(f:i2,ifpos(f:i3,f:xb+(fus:xtail-f:xb)*f:i3/fus:ntail,f:xa+(f:xb-f:xa)*f:i2/blend:nsec),f:xa*(1-cosd(90*f:i1/fus:nnose)))
+      # ---- round radius of the plain body here (ogive / cylinder / boattail) ----
+      SET       f:rog  ogive:cy+sqrt(max(0,ogive:rho^2-(f:x-fus:xcyl1)^2))
+      SET       f:rtl  f:R+(fus:rtail-f:R)*(f:x-fus:xcyl2)/fus:ltail
+      SET       f:r    ifpos(fus:xcyl1-f:x,f:rog,ifpos(f:x-fus:xcyl2,f:rtl,f:R))
+      # ---- blended-region width: follow the wing LE, saturate at wmax, round again behind the TE ----
+      SET       f:xi   max(0,min(1,(f:x-wing:xapex)/wing:D))
+      SET       f:zle  wing:z0+(wing:span-wing:z0)*(1-(1-f:xi^wing:hug)^wing:curl)
+      SET       f:v    max(f:R,f:R+blend:k*(f:zle-f:R))
+      SET       f:q    (f:v-f:R)/(blend:wmax-f:R)
+      SET       f:ww   f:R+(f:v-f:R)/sqrt(sqrt(1+f:q*f:q*f:q*f:q))
+      SET       f:sb   max(0,min(1,(f:x-wing:xte)/blend:lback))
+      SET       f:sm   f:sb*f:sb*(3-2*f:sb)
+      SET       f:inb  blend:on*ifpos(f:x-f:xa+1e-9,1,0)*ifpos(f:xb-f:x+1e-9,1,0)
+      SET       f:w    ifzero(f:inb,f:r,max(f:R,f:ww*(1-f:sm)+f:R*f:sm))
+      # ---- area ruling: pinch / widen the half-width, never below the local floor ----
+      SET       f:swst ifpos(ar:lw-abs(f:x-ar:xw),1-ar:depth*cosd(90*(f:x-ar:xw)/ar:lw)^2,1)
+      SET       f:sarr ifpos(f:x-fus:xtail+1e-9,ar:scale[ar:n],0)
+      PATBEG    jar  ar:n-1
+         SET       f:xa1  fus:xtail*(jar-1)/(ar:n-1)
+         SET       f:xa2  fus:xtail*jar/(ar:n-1)
+         SET       f:sarr f:sarr+ifpos(f:x-f:xa1+1e-9,1,0)*ifpos(f:xa2-f:x,1,0)*(ar:scale[jar]+(ar:scale[jar+1]-ar:scale[jar])*(f:x-f:xa1)/(f:xa2-f:xa1))
+      PATEND
+      SET       f:flE  ifpos(f:x-inlet:xface+ar:engfwd,ar:wmineng,ar:wmin)
+      SET       f:flo  ifpos(f:x-wing:xapex+1e-9,ifpos(wing:xte-f:x+1e-9,max(f:R,f:flE),f:flE),f:flE)
+      SET       f:wp   max(min(f:w,f:flo),f:w*f:swst*f:sarr)
+      SET       f:sig  ifzero(f:inb,0,max(0,min(1,(f:wp-f:R)/(blend:wmax-f:R)))^0.5)
+      SET       f:h    ifzero(f:inb,f:r,f:R+(blend:hfac*f:R-f:R)*f:sig)
+      SET       f:pt   0.5+(blend:ptop-0.5)*f:sig
+      SET       f:pb   0.5+(blend:pbot-0.5)*f:sig
+      SET       f:te   min(blend:te,0.02*f:h)
+      SET       f:hu   f:h-f:te
+      # ---- section in the plane x = f:x: right edge -> upper -> left edge -> lower -> right edge ----
+      SKBEG     f:x   f:te                              f:wp
+         SPLINE f:x   f:te+f:hu*sind(18)^(2*f:pt)       f:wp*cosd(18)
+         SPLINE f:x   f:te+f:hu*sind(36)^(2*f:pt)       f:wp*cosd(36)
+         SPLINE f:x   f:te+f:hu*sind(54)^(2*f:pt)       f:wp*cosd(54)
+         SPLINE f:x   f:te+f:hu*sind(72)^(2*f:pt)       f:wp*cosd(72)
+         SPLINE f:x   f:te+f:hu                         0
+         SPLINE f:x   f:te+f:hu*sind(108)^(2*f:pt)      f:wp*cosd(108)
+         SPLINE f:x   f:te+f:hu*sind(126)^(2*f:pt)      f:wp*cosd(126)
+         SPLINE f:x   f:te+f:hu*sind(144)^(2*f:pt)      f:wp*cosd(144)
+         SPLINE f:x   f:te+f:hu*sind(162)^(2*f:pt)      f:wp*cosd(162)
+         SPLINE f:x   f:te                              -f:wp
+         LINSEG f:x   -f:te                             -f:wp
+         SPLINE f:x   -f:te-f:hu*sind(162)^(2*f:pb)     f:wp*cosd(162)
+         SPLINE f:x   -f:te-f:hu*sind(144)^(2*f:pb)     f:wp*cosd(144)
+         SPLINE f:x   -f:te-f:hu*sind(126)^(2*f:pb)     f:wp*cosd(126)
+         SPLINE f:x   -f:te-f:hu*sind(108)^(2*f:pb)     f:wp*cosd(108)
+         SPLINE f:x   -f:te-f:hu                        0
+         SPLINE f:x   -f:te-f:hu*sind(72)^(2*f:pb)      f:wp*cosd(72)
+         SPLINE f:x   -f:te-f:hu*sind(54)^(2*f:pb)      f:wp*cosd(54)
+         SPLINE f:x   -f:te-f:hu*sind(36)^(2*f:pb)      f:wp*cosd(36)
+         SPLINE f:x   -f:te-f:hu*sind(18)^(2*f:pb)      f:wp*cosd(18)
+         SPLINE f:x   -f:te                             f:wp
+         LINSEG f:x   f:te                              f:wp
+      SKEND
+   PATEND
+BLEND
+ASSERT    @itype  3
+SELECT    FACE
+   ATTRIBUTE _color $cyan
+
+# ---------------- ogee wing: right panel BLEND, mirrored for the left ----------------
+# sections at xi = 0, 1/nsec, ..., 1 along the leading edge; xi = 0 is the buried root at z0
+MARK
+   PATBEG    isec  wing:nsec+1
+      SET       w:xi   (isec-1)/wing:nsec
+      SET       w:z    wing:z0+(wing:span-wing:z0)*(1-(1-w:xi^wing:hug)^wing:curl)
+      SET       w:xle  wing:xapex+wing:D*w:xi
+      SET       w:xte  wing:xte+w:z*tand(wing:tesweep)
+      SET       w:t    wing:thickr+(wing:thickt-wing:thickr)*w:z/wing:span
+      UDPRIM    naca   thickness  w:t   sharpte  wing:sharpte
+      SCALE     w:xte-w:xle
+      TRANSLATE w:xle  wing:yloc  w:z
+   PATEND
+BLEND
+ASSERT    @itype  3
+SELECT    FACE
+   ATTRIBUTE _color $green
+STORE     rightWing
+
+RESTORE   rightWing
+UNION
+ASSERT    @itype  3
+RESTORE   rightWing
+MIRROR    0  0  1  0
+UNION
+ASSERT    @itype  3
+
+# ---------------- vertical fin (built along +z, then stood up to +y) ----------------
+MARK
+   UDPRIM    naca   thickness  vtail:thick  sharpte  vtail:sharpte
+   SCALE     vtail:croot
+   TRANSLATE vtail:xroot  0  0
+
+   UDPRIM    naca   thickness  vtail:thick  sharpte  vtail:sharpte
+   SCALE     vtail:ctip
+   TRANSLATE vtail:xtip   0  vtail:height
+RULE
+ASSERT    @itype  3
+ROTATEX   -90  0  0
+SELECT    FACE
+   ATTRIBUTE _color $yellow
+UNION
+ASSERT    @itype  3
+
+# =========================== CHIN INLET ===========================
+# Adapted from superDrone's ventral inlet, with a real boundary-layer diverter:
+#   cowl  = outer skin (loft), UNIONed; its top sits inlet:gap below the belly at the lip
+#           and rises into the fuselage through the S-bend
+#   plate = thin diverter joining the cowl to the belly over the gap, UNIONed
+#           (the boundary layer spills sideways around it)
+#   duct  = flow passage (loft), SUBTRACTed; optional straight run + convergent nozzle
+IFTHEN    inlet:on  eq  1
+   SET       inlet:R      fus:radius
+   SET       inlet:xlip   fus:xcyl1+inlet:xoff
+   SET       inlet:xs     inlet:xlip+inlet:lstraight
+   SET       inlet:lext   min(0.3,0.5*inlet:xoff)                    # duct pokes ahead of the lip
+   SET       inlet:ref    sqrt(inlet:efRatio*inlet:w*inlet:h)        # engine-face radius
+   SET       inlet:rex    min(inlet:ref*sqrt(inlet:exitRatio),fus:rtail-0.03)
+   SET       inlet:N      8
+   SET       inlet:Acap   pi(1)*inlet:w*inlet:h
+   SET       inlet:Aface  pi(1)*inlet:ref^2
+   SET       inlet:Aexit  inlet:through*pi(1)*inlet:rex^2
+   SET       inlet:yc0    -inlet:R-inlet:gap-inlet:lipt-inlet:h      # mouth centerline (y)
+   SET       inlet:bR     inlet:blend*inlet:R
+
+   ASSERT    ifpos(inlet:xoff-0.05,1,0)                       1    # lip behind the nose/cylinder seam
+   ASSERT    ifpos(inlet:xface-inlet:xs,1,0)                  1    # engine face behind the straight run
+   ASSERT    ifpos(fus:xcyl2-inlet:xface,1,0)                 1    # engine face on the cylinder
+   ASSERT    ifpos(inlet:bR-inlet:ref-inlet:lipt,1,0)         1    # duct + wall fit inside the flare
+   ASSERT    ifpos(1-inlet:blend,1,0)                         1    # flare ends inside the fuselage
+   ASSERT    ifpos(inlet:R-inlet:w-inlet:lipt,1,0)            1    # mouth narrower than the fuselage
+   ASSERT    ifpos(inlet:rex-0.02,1,0)                        1    # nozzle stays open
+
+   # where the cowl top climbs back into the belly: smooth step s(t) = t^2 (3 - 2t) reaches
+   # s* = gap / (R + gap + bR); 3 t^2 ~ s* gives t*, plus margin, so the plate is long enough
+   SET       inlet:sstar  inlet:gap/(inlet:R+inlet:gap+inlet:bR)
+   SET       inlet:tdivE  min(0.9,sqrt(inlet:sstar/3)+0.15)
+   SET       inlet:xdivE  inlet:xs+inlet:tdivE*(inlet:xface-inlet:xs)
+
+   # ---- cowl ----
+   MARK
+      UDPRIM    supell    rx  inlet:w+inlet:lipt  ry  inlet:h+inlet:lipt  n  inlet:nsup  nquad  4
+      ROTATEY   90  0  0
+      TRANSLATE inlet:xlip  inlet:yc0  0
+
+      UDPRIM    supell    rx  inlet:w+inlet:lipt  ry  inlet:h+inlet:lipt  n  inlet:nsup  nquad  4
+      ROTATEY   90  0  0
+      TRANSLATE inlet:xs  inlet:yc0  0
+
+      PATBEG    inlet:k  inlet:N
+         SET       inlet:t   inlet:k/inlet:N
+         SET       inlet:s   inlet:t*inlet:t*(3-2*inlet:t)
+         SET       inlet:xk  inlet:xs+inlet:t*(inlet:xface-inlet:xs)
+         SET       inlet:yk  inlet:yc0*(1-inlet:s)
+         SET       inlet:nk  inlet:nsup+inlet:s*(2-inlet:nsup)
+         SET       inlet:ao  inlet:w+inlet:lipt+inlet:s*(inlet:bR-inlet:w-inlet:lipt)
+         SET       inlet:bo  inlet:h+inlet:lipt+inlet:s*(inlet:bR-inlet:h-inlet:lipt)
+         UDPRIM    supell    rx  inlet:ao  ry  inlet:bo  n  inlet:nk  nquad  4
+         ROTATEY   90  0  0
+         TRANSLATE inlet:xk  inlet:yk  0
+      PATEND
+   RULE
+   ASSERT    @itype  3
+   UNION
+   ASSERT    @itype  3
+
+   # ---- diverter plate (side view sketched in x-y, extruded across z) ----
+   # bottom edge buried in the cowl wall, top edge buried in the fuselage, swept leading edge
+   SET       inlet:ybot   -inlet:R-inlet:gap-0.5*inlet:lipt
+   SET       inlet:ytop   -inlet:R+0.03
+   SET       inlet:xdiv0  inlet:xlip+0.02
+   SKBEG     inlet:xdiv0                     inlet:ybot  0
+      LINSEG inlet:xdivE                     inlet:ybot  0
+      LINSEG inlet:xdivE                     inlet:ytop  0
+      LINSEG inlet:xdiv0+1.5*inlet:gap       inlet:ytop  0
+      LINSEG inlet:xdiv0                     inlet:ybot  0
+   SKEND
+   EXTRUDE   0  0  inlet:tdiv
+   TRANSLATE 0  0  -inlet:tdiv/2
+   ASSERT    @itype  3
+   UNION
+   ASSERT    @itype  3
+
+   # ---- duct ----
+   MARK
+      UDPRIM    supell    rx  inlet:w  ry  inlet:h  n  inlet:nsup  nquad  4
+      ROTATEY   90  0  0
+      TRANSLATE inlet:xlip-inlet:lext  inlet:yc0  0
+
+      UDPRIM    supell    rx  inlet:w  ry  inlet:h  n  inlet:nsup  nquad  4
+      ROTATEY   90  0  0
+      TRANSLATE inlet:xs  inlet:yc0  0
+
+      PATBEG    inlet:k  inlet:N
+         SET       inlet:t   inlet:k/inlet:N
+         SET       inlet:s   inlet:t*inlet:t*(3-2*inlet:t)
+         SET       inlet:xk  inlet:xs+inlet:t*(inlet:xface-inlet:xs)
+         SET       inlet:yk  inlet:yc0*(1-inlet:s)
+         SET       inlet:nk  inlet:nsup+inlet:s*(2-inlet:nsup)
+         SET       inlet:ak  inlet:w+inlet:s*(inlet:ref-inlet:w)
+         SET       inlet:bk  inlet:h+inlet:s*(inlet:ref-inlet:h)
+         UDPRIM    supell    rx  inlet:ak  ry  inlet:bk  n  inlet:nk  nquad  4
+         ROTATEY   90  0  0
+         TRANSLATE inlet:xk  inlet:yk  0
+      PATEND
+
+      IFTHEN    inlet:through  eq  1
+         SET       inlet:xm   inlet:xface+0.55*(fus:xtail-inlet:xface)
+         UDPRIM    supell    rx  inlet:ref  ry  inlet:ref  n  2  nquad  4
+         ROTATEY   90  0  0
+         TRANSLATE inlet:xm  0  0
+
+         UDPRIM    supell    rx  inlet:rex  ry  inlet:rex  n  2  nquad  4
+         ROTATEY   90  0  0
+         TRANSLATE fus:xtail  0  0
+
+         UDPRIM    supell    rx  inlet:rex  ry  inlet:rex  n  2  nquad  4
+         ROTATEY   90  0  0
+         TRANSLATE fus:xtail+0.1  0  0
+      ENDIF
+   RULE
+   ASSERT    @itype  3
+
+   # duct ending at the engine face: tag the end cap for an SU2 outlet BC
+   IFTHEN    inlet:through  eq  0
+      SELECT    FACE
+      SELECT    SORT   $xmin
+      SET       inlet:nf   @sellist.size
+      SELECT    FACE   @sellist[inlet:nf]
+         ATTRIBUTE capsGroup  $EngineFace
+         ATTRIBUTE capsMesh   $EngineFace
+         ATTRIBUTE _color     $red
+   ENDIF
+
+   SUBTRACT
+   ASSERT    @itype  3
+ENDIF
+
+# =========================== AREA-DISTRIBUTION REPORT ===========================
+# Normal (x = const) cuts of the finished aircraft (fine at M 1.05: Mach angle ~72 deg).
+# Same slicing technique as Dannenhoffer's areaRule.csm / superDrone.
+IFTHEN    ar:report  eq  1
+   STORE     acArea
+   # captured streamtube ~ superellipse mouth area (n = 2 -> ellipse, ~ +7.6 % at n = 2.5)
+   SET       ar:Acap   inlet:on*pi(1)*inlet:w*inlet:h*(1+0.152*(inlet:nsup-2))
+   SET       ar:xlip   fus:xcyl1+inlet:xoff
+   SET       ar:xs     ar:xlip+inlet:lstraight
+   SET       ar:ref    sqrt(inlet:efRatio*inlet:w*inlet:h)
+   SET       ar:rex    min(ar:ref*sqrt(inlet:exitRatio),fus:rtail-0.03)
+   SET       ar:xm     inlet:xface+0.55*(fus:xtail-inlet:xface)
+   SET       ar:V      0
+   SET       ar:xprev  0
+   SET       ar:sprev  0
+   SET       ar:SmaxEff  0
+   PATBEG    jsl  ar:nslice
+      SET       ar:xx   fus:xtail*(jsl-0.5)/ar:nslice
+      SET       ar:x[jsl]  ar:xx
+      RESTORE   acArea
+      BOX       ar:xx  -3  -3  0  6  6
+      INTERSECT none  -1
+      SET       ar:nst  @stack.size
+      SET       ar:S[jsl]  0
+      PATBEG    jst  ar:nst
+         SELECT BODY  @stack[jst]
+         SET    ar:S[jsl]  ar:S[jsl]+@area
+      PATEND
+      STORE     ...
+      # duct cavity area at this station (the duct is subtracted from the solid)
+      SET       ar:t    max(0,min(1,(ar:xx-ar:xs)/(inlet:xface-ar:xs)))
+      SET       ar:sm   ar:t*ar:t*(3-2*ar:t)
+      SET       ar:da   inlet:w+ar:sm*(ar:ref-inlet:w)
+      SET       ar:db   inlet:h+ar:sm*(ar:ref-inlet:h)
+      SET       ar:dn   inlet:nsup+ar:sm*(2-inlet:nsup)
+      SET       ar:Afwd pi(1)*ar:da*ar:db*(1+0.152*(ar:dn-2))
+      SET       ar:ra   ifpos(ar:xx-ar:xm,ar:ref+(ar:rex-ar:ref)*(ar:xx-ar:xm)/(fus:xtail-ar:xm),ar:ref)
+      SET       ar:Aaft inlet:through*pi(1)*ar:ra^2
+      SET       ar:Ad   inlet:on*ifpos(ar:xx-ar:xlip,1,0)*ifpos(inlet:xface-ar:xx,ar:Afwd,ar:Aaft)
+      SET       ar:Seff[jsl]  ar:S[jsl]+ar:Ad-ifpos(ar:xx-ar:xlip,ar:Acap,0)
+      SET       ar:V    ar:V+0.5*(ar:Seff[jsl]+ar:sprev)*(ar:xx-ar:xprev)
+      SET       ar:xprev  ar:xx
+      SET       ar:sprev  ar:Seff[jsl]
+      SET       ar:SmaxEff  max(ar:SmaxEff,ar:Seff[jsl])
+   PATEND
+   # Sears-Haack with the same length (nose tip to base) and volume
+   SET       ar:L      fus:xtail
+   SET       ar:SmaxSH 16*ar:V/(3*pi(1)*ar:L)
+   SET       ar:dqSH   9*pi(1)*ar:SmaxSH^2/(2*ar:L^2)
+
+   MESSAGE   !$length=+val2str(ar:L,4)+$_volume=+val2str(ar:V,5)+$_maxAreaCorrected=+val2str(ar:SmaxEff,5)+$_maxAreaSearsHaack=+val2str(ar:SmaxSH,5)+$_DqSearsHaack=+val2str(ar:dqSH,6)+$_Acap=+val2str(ar:Acap,5)
+   MESSAGE   AREA-CSV-BEGIN
+   MESSAGE   x_rawArea_correctedArea_searsHaack
+   PATBEG    jsl  ar:nslice
+      SET       ar:xi   ar:x[jsl]/ar:L
+      SET       ar:ash  ar:SmaxSH*(4*ar:xi*(1-ar:xi))^1.5
+      MESSAGE   !val2str(ar:x[jsl],5)+$_+val2str(ar:S[jsl],6)+$_+val2str(ar:Seff[jsl],6)+$_+val2str(ar:ash,6)
+   PATEND
+   MESSAGE   AREA-CSV-END
+
+   RESTORE   acArea
+ENDIF
+
+END
