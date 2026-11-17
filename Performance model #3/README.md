@@ -57,6 +57,7 @@ Both read their baseline from `inputs.py`, relax the weight cap to 150 lb, and w
 | Script | What it answers |
 |---|---|
 | `weight_vs_altitude.py` | Closed W_TO vs dash altitude for the P220, P400, P550, P900 and P1000 (q limit lifted, its altitude shaded); lowest dash altitude under 55 lb per engine |
+| `excess_thrust.py` | Mach 1 excess thrust and specific excess power vs dash altitude for each engine's own closed design, designs under 55 lb only |
 | `tornado.py` | Change in W_TO for -20 % / +20 % on each of 26 constants at the `inputs.py` dash altitude, with a continuously scalable copy of the `inputs.py` engine |
 
 ## Running
